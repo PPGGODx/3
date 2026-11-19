@@ -527,8 +527,8 @@ class InnerTubeClient(
             ?.get("url")?.jsonPrimitive?.contentOrNull
             ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 
-        val highResThumb = rawThumb.replace(Regex("=w\d+-h\d+"), "=w544-h544")
-
+        val highResThumb = rawThumb.replace(Regex("=w\\d+-h\\d+"), "=w544-h544")
+        
         return TrackItem(
             videoId = videoId,
             title = title,
