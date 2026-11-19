@@ -13,7 +13,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
-    private val streamHeaderInterceptor = Interceptor { chain ->
+    private val streamNetworkInterceptor = Interceptor { chain ->
         val original = chain.request()
         val urlStr = original.url.toString()
         if (urlStr.contains("googlevideo.com")) {
@@ -31,7 +31,7 @@ class AppContainer(context: Context) {
                     .header("Referer", "https://www.youtube.com/")
             }
 
-            // แบ่ง Range แบบปลายเปิด (bytes=start-) เป็นช่วงละ 2MB เพื่อเลี่ยง HTTP 403 บน ExoPlayer
+            // แปลง Range แบบปลายเปิด (bytes=start-) เป็นช่วงละ 2MB เพื่อเลี่ยง HTTP 403 บน ExoPlayer
             val rangeHeader = original.header("Range")
             val chunkBytes = 2L * 1024L * 1024L
             if (rangeHeader == null) {
@@ -51,8 +51,7 @@ class AppContainer(context: Context) {
     }
 
     val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(streamHeaderInterceptor)
-        .addNetworkInterceptor(streamHeaderInterceptor)
+        .addNetworkInterceptor(streamNetworkInterceptor)
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .followRedirects(true)

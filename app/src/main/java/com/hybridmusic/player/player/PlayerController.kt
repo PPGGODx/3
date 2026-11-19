@@ -131,7 +131,9 @@ class PlayerController(
                     repository.invalidateStreamCache(track.videoId)
                     playTrackInternal(track, _uiState.value.queue, forceRefresh = true)
                 } else {
-                    val httpCode = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+                    val httpCause = (error.cause as? HttpDataSource.InvalidResponseCodeException)
+                        ?: (error.cause?.cause as? HttpDataSource.InvalidResponseCodeException)
+                    val httpCode = httpCause?.responseCode
                     val detail = if (httpCode != null) {
                         "${error.errorCodeName} / HTTP $httpCode"
                     } else {
