@@ -3,11 +3,14 @@ package com.hybridmusic.player.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -120,6 +123,7 @@ class PlayerController(
                 }
             }
 
+            @OptIn(UnstableApi::class)
             override fun onPlayerError(error: PlaybackException) {
                 val track = _uiState.value.currentTrack
                 if (track != null && !retriedCurrentTrack) {
@@ -127,12 +131,16 @@ class PlayerController(
                     repository.invalidateStreamCache(track.videoId)
                     playTrackInternal(track, _uiState.value.queue, forceRefresh = true)
                 } else {
+                    val httpCode = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+                    val detail = if (httpCode != null) {
+                        "${error.errorCodeName} / HTTP $httpCode"
+                    } else {
+                        error.errorCodeName
+                    }
                     _uiState.value = _uiState.value.copy(
                         isBuffering = false,
                         isPlaying = false,
-                        val httpCode = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
-                    val detail = if (httpCode != null) "${error.errorCodeName} / HTTP $httpCode" else error.errorCodeName
-                    errorMessage = "เล่นเพลงไม่สำเร็จ ($detail) กรุณาลองกดเล่นใหม่อีกครั้ง"
+                        errorMessage = "เล่นเพลงไม่สำเร็จ ($detail) กรุณาลองกดเล่นใหม่อีกครั้ง"
                     )
                 }
             }
