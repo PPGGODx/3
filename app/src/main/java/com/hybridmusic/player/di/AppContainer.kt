@@ -18,12 +18,33 @@ class AppContainer(context: Context) {
         val urlStr = original.url.toString()
         if (urlStr.contains("googlevideo.com")) {
             val matchedUa = InnerTubeClient.resolveUserAgentForUrl(urlStr)
-            val updated = original.newBuilder()
+            val reqBuilder = original.newBuilder()
                 .header("User-Agent", matchedUa)
                 .header("Accept", "*/*")
                 .header("Connection", "keep-alive")
-                .build()
-            chain.proceed(updated)
+
+            if (urlStr.contains("c=WEB", ignoreCase = true) ||
+                urlStr.contains("c=TVHTML5", ignoreCase = true)
+            ) {
+                reqBuilder
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+            }
+
+            // แบ่ง Range แบบปลายเปิด (bytes=start-) เป็นช่วงละ 2MB เพื่อเลี่ยง HTTP 403 บน ExoPlayer
+            val rangeHeader = original.header("Range")
+            val chunkBytes = 2L * 1024L * 1024L
+            if (rangeHeader == null) {
+                reqBuilder.header("Range", "bytes=0-${chunkBytes - 1}")
+            } else {
+                val openRangeMatch = Regex("^bytes=(\\d+)-$").find(rangeHeader.trim())
+                if (openRangeMatch != null) {
+                    val start = openRangeMatch.groupValues[1].toLongOrNull() ?: 0L
+                    reqBuilder.header("Range", "bytes=$start-${start + chunkBytes - 1}")
+                }
+            }
+
+            chain.proceed(reqBuilder.build())
         } else {
             chain.proceed(original)
         }

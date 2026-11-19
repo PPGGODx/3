@@ -402,7 +402,14 @@ class InnerTubeClient(
                     val obj = item.jsonObject
                     val mimeType = obj["mimeType"]?.jsonPrimitive?.contentOrNull ?: continue
                     if (!mimeType.startsWith("audio/")) continue
-                    val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
+                    val rawUrl = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
+                    if (rawUrl.isBlank()) continue
+                    val url = if (rawUrl.contains("googlevideo.com") && !rawUrl.contains("cpn=")) {
+                        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+                        val cpn = (1..16).map { chars.random() }.joinToString("")
+                        val sep = if (rawUrl.contains("?")) "&" else "?"
+                        "$rawUrl${sep}cpn=$cpn"
+                    } else rawUrl
                     if (url.isBlank()) continue
                     val bitrate = obj["bitrate"]?.jsonPrimitive?.intOrNull ?: 0
                     val contentLength = obj["contentLength"]?.jsonPrimitive?.longOrNull ?: 0L

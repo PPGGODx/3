@@ -130,7 +130,9 @@ class PlayerController(
                     _uiState.value = _uiState.value.copy(
                         isBuffering = false,
                         isPlaying = false,
-                        errorMessage = "เล่นเพลงไม่สำเร็จ (${error.errorCodeName}) กรุณาลองกดเล่นใหม่อีกครั้ง"
+                        val httpCode = (error.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+                    val detail = if (httpCode != null) "${error.errorCodeName} / HTTP $httpCode" else error.errorCodeName
+                    errorMessage = "เล่นเพลงไม่สำเร็จ ($detail) กรุณาลองกดเล่นใหม่อีกครั้ง"
                     )
                 }
             }
