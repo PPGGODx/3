@@ -20,6 +20,8 @@ class AppContainer(context: Context) {
             val matchedUa = InnerTubeClient.resolveUserAgentForUrl(urlStr)
             val updated = original.newBuilder()
                 .header("User-Agent", matchedUa)
+                .header("Accept", "*/*")
+                .header("Connection", "keep-alive")
                 .build()
             chain.proceed(updated)
         } else {
@@ -29,9 +31,11 @@ class AppContainer(context: Context) {
 
     val httpClient: OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(streamHeaderInterceptor)
+        .addNetworkInterceptor(streamHeaderInterceptor)
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     val database: AppDatabase = AppDatabase.getInstance(context)

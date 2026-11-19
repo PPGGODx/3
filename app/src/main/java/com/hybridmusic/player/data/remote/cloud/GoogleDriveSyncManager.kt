@@ -29,7 +29,8 @@ data class CloudLibrarySnapshot(
 data class DriveFolderConnection(
     val treeUri: Uri,
     val folderName: String,
-    val isGoogleDriveProvider: Boolean
+    val isGoogleDriveProvider: Boolean,
+    val isSingleDocumentMode: Boolean = false
 )
 
 data class DriveFileEntry(
@@ -46,8 +47,8 @@ class GoogleDriveSyncManager(
         private const val PREFS_NAME = "playzongx_google_drive_prefs"
         private const val KEY_TREE_URI = "drive_tree_uri"
         private const val KEY_FOLDER_NAME = "drive_folder_name"
+        private const val KEY_IS_SINGLE_DOC = "drive_is_single_doc"
         private const val BACKUP_JSON_NAME = "PlayZongX_Library_Backup.json"
-        const val GOOGLE_DRIVE_AUTHORITY = "com.google.android.apps.docs.storage"
     }
 
     private val prefs by lazy {
@@ -66,41 +67,60 @@ class GoogleDriveSyncManager(
     private fun loadSavedConnection(): DriveFolderConnection? {
         val uriString = prefs.getString(KEY_TREE_URI, null) ?: return null
         val uri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return null
-        val hasPerm = context.contentResolver.persistedUriPermissions.any {
-            it.uri == uri && it.isReadPermission && it.isWritePermission
-        }
-        if (!hasPerm) {
-            prefs.edit().remove(KEY_TREE_URI).remove(KEY_FOLDER_NAME).apply()
-            return null
-        }
-        val savedName = prefs.getString(KEY_FOLDER_NAME, null) ?: resolveFolderDisplayName(uri)
+        val isSingleDoc = prefs.getBoolean(KEY_IS_SINGLE_DOC, false)
+        val savedName = prefs.getString(KEY_FOLDER_NAME, null) ?: "Google Drive / PlayZongX"
         return DriveFolderConnection(
             treeUri = uri,
             folderName = savedName,
-            isGoogleDriveProvider = uri.authority?.contains("docs.storage") == true
+            isGoogleDriveProvider = uri.authority?.contains("docs.storage") == true,
+            isSingleDocumentMode = isSingleDoc
         )
     }
 
-    fun getSuggestedDriveInitialUri(): Uri? {
+    fun getSuggestedDriveInitialUri(): Uri? = null
+
+    fun connectSyncFileUri(docUri: Uri): Result<DriveFolderConnection> {
         return runCatching {
-            DocumentsContract.buildRootUri(GOOGLE_DRIVE_AUTHORITY, "primary")
-        }.getOrNull()
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(docUri, flags)
+            }
+            val displayName = resolveDisplayNameFromUri(docUri)
+            prefs.edit()
+                .putString(KEY_TREE_URI, docUri.toString())
+                .putString(KEY_FOLDER_NAME, displayName)
+                .putBoolean(KEY_IS_SINGLE_DOC, true)
+                .apply()
+
+            val connection = DriveFolderConnection(
+                treeUri = docUri,
+                folderName = displayName,
+                isGoogleDriveProvider = docUri.authority?.contains("docs.storage") == true,
+                isSingleDocumentMode = true
+            )
+            _connectedFolder.value = connection
+            connection
+        }
     }
 
     fun connectFolderUri(treeUri: Uri): Result<DriveFolderConnection> {
         return runCatching {
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            context.contentResolver.takePersistableUriPermission(treeUri, flags)
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(treeUri, flags)
+            }
             val folderName = resolveFolderDisplayName(treeUri)
             prefs.edit()
                 .putString(KEY_TREE_URI, treeUri.toString())
                 .putString(KEY_FOLDER_NAME, folderName)
+                .putBoolean(KEY_IS_SINGLE_DOC, false)
                 .apply()
 
             val connection = DriveFolderConnection(
                 treeUri = treeUri,
                 folderName = folderName,
-                isGoogleDriveProvider = treeUri.authority?.contains("docs.storage") == true
+                isGoogleDriveProvider = treeUri.authority?.contains("docs.storage") == true,
+                isSingleDocumentMode = false
             )
             _connectedFolder.value = connection
             connection
@@ -114,7 +134,11 @@ class GoogleDriveSyncManager(
                 context.contentResolver.releasePersistableUriPermission(current.treeUri, flags)
             }
         }
-        prefs.edit().remove(KEY_TREE_URI).remove(KEY_FOLDER_NAME).apply()
+        prefs.edit()
+            .remove(KEY_TREE_URI)
+            .remove(KEY_FOLDER_NAME)
+            .remove(KEY_IS_SINGLE_DOC)
+            .apply()
         _connectedFolder.value = null
     }
 
@@ -138,7 +162,10 @@ class GoogleDriveSyncManager(
 
     suspend fun listFilesInConnectedFolder(): List<DriveFileEntry> = withContext(Dispatchers.IO) {
         val conn = _connectedFolder.value ?: return@withContext emptyList()
-        val treeId = DocumentsContract.getTreeDocumentId(conn.treeUri)
+        if (conn.isSingleDocumentMode) return@withContext emptyList()
+
+        val treeId = runCatching { DocumentsContract.getTreeDocumentId(conn.treeUri) }.getOrNull()
+            ?: return@withContext emptyList()
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(conn.treeUri, treeId)
         val result = mutableListOf<DriveFileEntry>()
 
@@ -173,6 +200,17 @@ class GoogleDriveSyncManager(
         withContext(Dispatchers.IO) {
             val conn = _connectedFolder.value ?: return@withContext false
             val jsonPayload = json.encodeToString(snapshot)
+
+            if (conn.isSingleDocumentMode) {
+                return@withContext runCatching {
+                    context.contentResolver.openOutputStream(conn.treeUri, "wt")?.use { out ->
+                        out.write(jsonPayload.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    } ?: return@withContext false
+                    true
+                }.getOrDefault(false)
+            }
+
             val existingFiles = listFilesInConnectedFolder()
             val existingBackup = existingFiles.firstOrNull { it.displayName == BACKUP_JSON_NAME }
 
@@ -200,6 +238,10 @@ class GoogleDriveSyncManager(
 
     suspend fun downloadMetadataSnapshot(): CloudLibrarySnapshot? =
         withContext(Dispatchers.IO) {
+            val conn = _connectedFolder.value ?: return@withContext null
+            if (conn.isSingleDocumentMode) {
+                return@withContext readSnapshotFromUri(conn.treeUri)
+            }
             val existingFiles = listFilesInConnectedFolder()
             val backupFile = existingFiles.firstOrNull { it.displayName == BACKUP_JSON_NAME }
                 ?: return@withContext null
@@ -225,6 +267,7 @@ class GoogleDriveSyncManager(
                 val content = context.contentResolver.openInputStream(sourceUri)?.use { input ->
                     input.bufferedReader(Charsets.UTF_8).readText()
                 } ?: return@withContext null
+                if (content.isBlank()) return@withContext null
                 json.decodeFromString<CloudLibrarySnapshot>(content)
             }.getOrNull()
         }
@@ -233,6 +276,7 @@ class GoogleDriveSyncManager(
         withContext(Dispatchers.IO) {
             if (!localFile.exists() || localFile.length() == 0L) return@withContext null
             val conn = _connectedFolder.value ?: return@withContext null
+            if (conn.isSingleDocumentMode) return@withContext null
 
             val safeTitle = title.replace(Regex("[^a-zA-Z0-9ก-๙ _-]"), "").trim().take(40)
             val remoteFileName = if (safeTitle.isNotEmpty()) {
@@ -299,6 +343,6 @@ class GoogleDriveSyncManager(
                 ?.use { cursor ->
                     if (cursor.moveToFirst()) cursor.getString(0) else null
                 }
-        }.getOrNull() ?: uri.lastPathSegment ?: "Drive Audio Track"
+        }.getOrNull() ?: uri.lastPathSegment ?: "PlayZongX_Cloud_Sync.json"
     }
 }

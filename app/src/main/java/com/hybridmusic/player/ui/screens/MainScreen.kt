@@ -157,7 +157,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val exportBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
-        viewModel.exportBackupToDrive(uri)
+        viewModel.onDriveSyncFileSelected(uri)
     }
 
     val importBackupLauncher = rememberLauncherForActivityResult(
@@ -362,7 +362,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 importDriveAudioLauncher.launch(arrayOf("audio/*"))
                             },
                             onExportBackupFile = {
-                                exportBackupLauncher.launch("PlayZongX_Backup.json")
+                                exportBackupLauncher.launch("PlayZongX_Cloud_Sync.json")
                             },
                             onImportBackupFile = {
                                 importBackupLauncher.launch(arrayOf("application/json", "*/*"))
@@ -1805,21 +1805,37 @@ private fun GoogleDriveTab(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     if (connectedFolder == null) {
-                        Button(
-                            onClick = onSelectDriveFolder,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SpicetifyCrimsonPalette.CrimsonCore,
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "เลือกโฟลเดอร์ Google Drive",
-                                fontWeight = FontWeight.Bold
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onExportBackupFile,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SpicetifyCrimsonPalette.CrimsonCore,
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.AddToDrive, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "สร้าง/เชื่อมไฟล์ซิงก์บน Google Drive",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onSelectDriveFolder,
+                                border = BorderStroke(1.dp, SpicetifyCrimsonPalette.CrimsonCore.copy(alpha = 0.75f)),
+                                shape = RoundedCornerShape(50),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, tint = SpicetifyCrimsonPalette.CrimsonBright)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "เลือกโฟลเดอร์ซิงก์ในเครื่อง / SD Card",
+                                    color = SpicetifyCrimsonPalette.PureIce,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     } else {
                         Surface(

@@ -184,6 +184,17 @@ class MainViewModel(
     // Google Drive Direct Folder & File Operations
     fun getSuggestedDriveUri(): Uri? = driveSyncManager.getSuggestedDriveInitialUri()
 
+    fun onDriveSyncFileSelected(fileUri: Uri?) {
+        if (fileUri == null) return
+        val res = driveSyncManager.connectSyncFileUri(fileUri)
+        res.onSuccess { conn ->
+            _statusBanner.value = "เชื่อมต่อ Google Drive (${conn.folderName}) สำเร็จ"
+            syncGoogleDriveNow()
+        }.onFailure { err ->
+            _statusBanner.value = "ไม่สามารถเชื่อมต่อไฟล์ได้: ${err.message}"
+        }
+    }
+
     fun onDriveFolderSelected(treeUri: Uri?) {
         if (treeUri == null) return
         val res = driveSyncManager.connectFolderUri(treeUri)
