@@ -1531,7 +1531,7 @@ private fun PlaylistDetailScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "กดปุ่ม "+ เพิ่มเพลง" ด้านบนเพื่อเลือกเพลงเข้าเพลย์ลิสต์ได้เลย",
+                            text = "กดปุ่ม \"+ เพิ่มเพลง\" ด้านบนเพื่อเลือกเพลงเข้าเพลย์ลิสต์ได้เลย",
                             fontSize = 12.sp,
                             color = SpicetifyCrimsonPalette.SilverMist
                         )
@@ -1606,7 +1606,7 @@ private fun PlaylistDetailScreen(
             containerColor = Color(0xF5180A10),
             title = {
                 Text(
-                    "เพิ่มเพลงเข้า "${playlistWithSongs.playlist.name}"",
+                    "เพิ่มเพลงเข้า \"${playlistWithSongs.playlist.name}\"",
                     color = SpicetifyCrimsonPalette.PureIce
                 )
             },
@@ -2417,7 +2417,7 @@ private fun AddToPlaylistDialog(
         containerColor = Color(0xF5180A10),
         title = {
             Text(
-                "เพิ่ม "${track.title}" ลงเพลย์ลิสต์",
+                "เพิ่ม \"${track.title}\" ลงเพลย์ลิสต์",
                 color = SpicetifyCrimsonPalette.PureIce
             )
         },
