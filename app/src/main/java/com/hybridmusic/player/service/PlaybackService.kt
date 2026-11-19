@@ -19,23 +19,24 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val app = applicationContext as HybridMusicApp
-        // OkHttpClient already injects the exact matching User-Agent per stream via streamHeaderInterceptor
-        val okHttpFactory = OkHttpDataSource.Factory(app.container.httpClient)
-        val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
+        runCatching {
+            val app = applicationContext as HybridMusicApp
+            val okHttpFactory = OkHttpDataSource.Factory(app.container.httpClient)
+            val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
 
-        val audioAttributes = AudioAttributes.Builder()
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .setUsage(C.USAGE_MEDIA)
-            .build()
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setUsage(C.USAGE_MEDIA)
+                .build()
 
-        val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .setAudioAttributes(audioAttributes, true)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
+            val player = ExoPlayer.Builder(this)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+                .setAudioAttributes(audioAttributes, true)
+                .setHandleAudioBecomingNoisy(true)
+                .build()
 
-        mediaSession = MediaSession.Builder(this, player).build()
+            mediaSession = MediaSession.Builder(this, player).build()
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
