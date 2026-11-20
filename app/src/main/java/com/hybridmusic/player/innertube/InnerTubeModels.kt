@@ -8,6 +8,31 @@ data class TrackItem(
     val thumbnailUrl: String = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 )
 
+data class YtPlaylistCard(
+    val browseId: String,
+    val title: String,
+    val subtitle: String,
+    val thumbnailUrl: String
+)
+
+data class HomeShelf(
+    val title: String,
+    val tracks: List<TrackItem> = emptyList(),
+    val playlists: List<YtPlaylistCard> = emptyList()
+)
+
+data class MoodChip(
+    val title: String,
+    val queryOrParams: String,
+    val isBrowseParams: Boolean = false
+)
+
+data class HomeFeedResult(
+    val moods: List<MoodChip>,
+    val quickPicks: List<TrackItem>,
+    val shelves: List<HomeShelf>
+)
+
 data class AudioStreamInfo(
     val url: String,
     val mimeType: String,
