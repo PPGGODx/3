@@ -3,19 +3,17 @@ package com.hybridmusic.player.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
-import androidx.annotation.OptIn
+import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
-import com.hybridmusic.player.data.remote.innertube.TrackItem
-import com.hybridmusic.player.data.repository.MusicRepository
+import com.hybridmusic.player.innertube.InnerTubeClient
+import com.hybridmusic.player.innertube.TrackItem
 import com.hybridmusic.player.service.PlaybackService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,127 +36,121 @@ data class PlaybackUiState(
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
-    val sleepTimerRemainingSec: Int? = null,
+    val engineBadge: String = "Ad-Free YT Music Engine",
     val errorMessage: String? = null
 )
 
 class PlayerController(
     private val context: Context,
-    private val repository: MusicRepository
+    private val innerTubeClient: InnerTubeClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
     private var progressJob: Job? = null
-    private var sleepTimerJob: Job? = null
-    private var retriedCurrentTrack = false
+    private var useEmbedFallback = false
 
     private val _uiState = MutableStateFlow(PlaybackUiState())
     val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
+
+    private val embedEngine = AdFreeEmbedEngine(
+        context = context,
+        onProgressUpdate = { playing, pos, dur ->
+            if (useEmbedFallback) {
+                _uiState.value = _uiState.value.copy(
+                    isPlaying = playing,
+                    isBuffering = !playing && pos == 0L,
+                    positionMs = pos.coerceAtLeast(0L),
+                    durationMs = if (dur > 0L) dur else (_uiState.value.currentTrack?.durationMs ?: 0L),
+                    errorMessage = null
+                )
+            }
+        },
+        onTrackEnded = { if (useEmbedFallback) playNextInQueue() },
+        onEngineError = { msg ->
+            if (useEmbedFallback) {
+                _uiState.value = _uiState.value.copy(isBuffering = false, isPlaying = false, errorMessage = msg)
+            }
+        }
+    )
 
     init {
         connectToService()
     }
 
+    fun getEmbedWebView(): WebView? = embedEngine.getAttachableView()
+
     private fun connectToService() {
-        val sessionToken = SessionToken(
-            context,
-            ComponentName(context, PlaybackService::class.java)
-        )
+        val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture = future
-        future.addListener(
-            {
-                runCatching {
-                    val controller = future.get()
-                    mediaController = controller
-                    attachPlayerListener(controller)
-                    startProgressUpdater()
-                }
-            },
-            ContextCompat.getMainExecutor(context)
-        )
+        future.addListener({
+            runCatching {
+                val controller = future.get()
+                mediaController = controller
+                attachExoListener(controller)
+                startExoProgressUpdater()
+            }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     private suspend fun awaitMediaController(): MediaController? {
         mediaController?.let { return it }
         val future = controllerFuture ?: return null
-        return suspendCancellableCoroutine { continuation ->
-            future.addListener(
-                {
-                    val ctrl = runCatching { future.get() }.getOrNull()
-                    if (ctrl != null && mediaController == null) {
-                        mediaController = ctrl
-                        attachPlayerListener(ctrl)
-                        startProgressUpdater()
-                    }
-                    if (continuation.isActive) {
-                        continuation.resume(ctrl)
-                    }
-                },
-                ContextCompat.getMainExecutor(context)
-            )
+        return suspendCancellableCoroutine { cont ->
+            future.addListener({
+                val ctrl = runCatching { future.get() }.getOrNull()
+                if (ctrl != null && mediaController == null) {
+                    mediaController = ctrl
+                    attachExoListener(ctrl)
+                    startExoProgressUpdater()
+                }
+                if (cont.isActive) cont.resume(ctrl)
+            }, ContextCompat.getMainExecutor(context))
         }
     }
 
-    private fun attachPlayerListener(player: Player) {
+    private fun attachExoListener(player: Player) {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _uiState.value = _uiState.value.copy(
-                    isPlaying = isPlaying,
-                    errorMessage = if (isPlaying) null else _uiState.value.errorMessage
-                )
+                if (!useEmbedFallback) {
+                    _uiState.value = _uiState.value.copy(
+                        isPlaying = isPlaying,
+                        errorMessage = if (isPlaying) null else _uiState.value.errorMessage
+                    )
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _uiState.value = _uiState.value.copy(
-                    isBuffering = playbackState == Player.STATE_BUFFERING,
-                    durationMs = player.duration.coerceAtLeast(0L)
-                )
-                if (playbackState == Player.STATE_READY) {
-                    retriedCurrentTrack = false
-                }
-                if (playbackState == Player.STATE_ENDED) {
-                    playNextInQueue()
+                if (!useEmbedFallback) {
+                    _uiState.value = _uiState.value.copy(
+                        isBuffering = playbackState == Player.STATE_BUFFERING,
+                        durationMs = player.duration.coerceAtLeast(_uiState.value.currentTrack?.durationMs ?: 0L)
+                    )
+                    if (playbackState == Player.STATE_ENDED) playNextInQueue()
                 }
             }
 
-            @OptIn(UnstableApi::class)
             override fun onPlayerError(error: PlaybackException) {
-                val track = _uiState.value.currentTrack
-                if (track != null && !retriedCurrentTrack) {
-                    retriedCurrentTrack = true
-                    repository.invalidateStreamCache(track.videoId)
-                    playTrackInternal(track, _uiState.value.queue, forceRefresh = true)
-                } else {
-                    val httpCause = (error.cause as? HttpDataSource.InvalidResponseCodeException)
-                        ?: (error.cause?.cause as? HttpDataSource.InvalidResponseCodeException)
-                    val httpCode = httpCause?.responseCode
-                    val detail = if (httpCode != null) {
-                        "${error.errorCodeName} / HTTP $httpCode"
-                    } else {
-                        error.errorCodeName
-                    }
-                    _uiState.value = _uiState.value.copy(
-                        isBuffering = false,
-                        isPlaying = false,
-                        errorMessage = "เล่นเพลงไม่สำเร็จ ($detail) กรุณาลองกดเล่นใหม่อีกครั้ง"
-                    )
-                }
+                val track = _uiState.value.currentTrack ?: return
+                innerTubeClient.invalidateCache(track.videoId)
+                switchToAdFreeEmbed(track)
             }
         })
     }
 
-    private fun startProgressUpdater() {
+    private fun startExoProgressUpdater() {
         progressJob?.cancel()
         progressJob = scope.launch {
             while (true) {
-                mediaController?.let { player ->
-                    if (player.isPlaying) {
-                        _uiState.value = _uiState.value.copy(
-                            positionMs = player.currentPosition.coerceAtLeast(0L),
-                            durationMs = player.duration.coerceAtLeast(0L)
-                        )
+                if (!useEmbedFallback) {
+                    mediaController?.let { player ->
+                        if (player.isPlaying) {
+                            _uiState.value = _uiState.value.copy(
+                                positionMs = player.currentPosition.coerceAtLeast(0L),
+                                durationMs = player.duration.coerceAtLeast(0L)
+                            )
+                        }
                     }
                 }
                 delay(400L)
@@ -167,73 +159,68 @@ class PlayerController(
     }
 
     fun playTrack(track: TrackItem, queue: List<TrackItem> = listOf(track)) {
-        retriedCurrentTrack = false
-        playTrackInternal(track, queue, forceRefresh = false)
-    }
-
-    private fun playTrackInternal(
-        track: TrackItem,
-        queue: List<TrackItem>,
-        forceRefresh: Boolean
-    ) {
         scope.launch {
-            val normalizedQueue = if (queue.any { it.videoId == track.videoId }) {
-                queue
-            } else {
-                listOf(track) + queue
-            }
-
+            val normalizedQueue = if (queue.any { it.videoId == track.videoId }) queue else listOf(track) + queue
             _uiState.value = _uiState.value.copy(
                 currentTrack = track,
                 queue = normalizedQueue,
                 isBuffering = true,
+                positionMs = 0L,
+                durationMs = track.durationMs,
                 errorMessage = null
             )
 
-            val uri = repository.resolvePlayableUri(track, forceRefresh = forceRefresh)
-            if (uri == null) {
-                _uiState.value = _uiState.value.copy(
-                    isBuffering = false,
-                    isPlaying = false,
-                    errorMessage = "ไม่สามารถดึงลิงก์เสียงได้ (ตรวจสอบอินเทอร์เน็ตหรือลองเลือกเพลงอื่น)"
-                )
-                return@launch
-            }
-
+            val stream = innerTubeClient.getCleanAudioStream(track.videoId)
             val controller = awaitMediaController()
-            if (controller == null) {
-                _uiState.value = _uiState.value.copy(
-                    isBuffering = false,
-                    errorMessage = "ระบบเล่นเพลงกำลังเริ่มต้น กรุณากดเล่นอีกครั้ง"
-                )
-                return@launch
+
+            if (stream != null && controller != null) {
+                useEmbedFallback = false
+                embedEngine.stop()
+                _uiState.value = _uiState.value.copy(engineBadge = "Direct Audio • ไม่มีโฆษณา 100%")
+
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(track.title)
+                    .setArtist(track.artist)
+                    .setArtworkUri(Uri.parse(track.thumbnailUrl))
+                    .build()
+
+                val mediaItem = MediaItem.Builder()
+                    .setMediaId(track.videoId)
+                    .setUri(Uri.parse(stream.url))
+                    .setMediaMetadata(metadata)
+                    .build()
+
+                controller.setMediaItem(mediaItem)
+                controller.prepare()
+                controller.play()
+            } else {
+                switchToAdFreeEmbed(track)
             }
-
-            val metadata = MediaMetadata.Builder()
-                .setTitle(track.title)
-                .setArtist(track.artist)
-                .setArtworkUri(
-                    if (track.thumbnailUrl.isNotBlank()) Uri.parse(track.thumbnailUrl) else null
-                )
-                .build()
-
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(track.videoId)
-                .setUri(uri)
-                .setMediaMetadata(metadata)
-                .build()
-
-            controller.setMediaItem(mediaItem)
-            controller.prepare()
-            controller.play()
         }
     }
 
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
+    private fun switchToAdFreeEmbed(track: TrackItem) {
+        useEmbedFallback = true
+        mediaController?.stop()
+        _uiState.value = _uiState.value.copy(
+            isBuffering = true,
+            engineBadge = "Ad-Free Stream • บล็อกโฆษณาอัตโนมัติ",
+            errorMessage = null
+        )
+        embedEngine.loadAndPlay(track.videoId)
     }
 
     fun togglePlayPause() {
+        if (useEmbedFallback) {
+            if (_uiState.value.isPlaying) {
+                embedEngine.pause()
+                _uiState.value = _uiState.value.copy(isPlaying = false)
+            } else {
+                embedEngine.play()
+                _uiState.value = _uiState.value.copy(isPlaying = true)
+            }
+            return
+        }
         mediaController?.let { player ->
             if (player.isPlaying) {
                 player.pause()
@@ -246,8 +233,8 @@ class PlayerController(
     }
 
     fun seekTo(positionMs: Long) {
-        mediaController?.seekTo(positionMs)
         _uiState.value = _uiState.value.copy(positionMs = positionMs)
+        if (useEmbedFallback) embedEngine.seekTo(positionMs) else mediaController?.seekTo(positionMs)
     }
 
     fun playNextInQueue() {
@@ -255,22 +242,19 @@ class PlayerController(
         val current = state.currentTrack ?: return
         if (state.repeatMode == Player.REPEAT_MODE_ONE) {
             seekTo(0L)
-            mediaController?.play()
+            if (useEmbedFallback) embedEngine.play() else mediaController?.play()
             return
         }
         val list = state.queue
         if (list.isEmpty()) return
-
-        val currentIndex = list.indexOfFirst { it.videoId == current.videoId }
+        val idx = list.indexOfFirst { it.videoId == current.videoId }
         val nextTrack = if (state.shuffleEnabled && list.size > 1) {
             list.filter { it.videoId != current.videoId }.random()
-        } else if (currentIndex in 0 until list.lastIndex) {
-            list[currentIndex + 1]
+        } else if (idx in 0 until list.lastIndex) {
+            list[idx + 1]
         } else if (state.repeatMode == Player.REPEAT_MODE_ALL) {
             list.first()
-        } else {
-            return
-        }
+        } else return
         playTrack(nextTrack, list)
     }
 
@@ -282,43 +266,20 @@ class PlayerController(
             return
         }
         val list = state.queue
-        val currentIndex = list.indexOfFirst { it.videoId == current.videoId }
-        if (currentIndex > 0) {
-            playTrack(list[currentIndex - 1], list)
-        } else {
-            seekTo(0L)
-        }
+        val idx = list.indexOfFirst { it.videoId == current.videoId }
+        if (idx > 0) playTrack(list[idx - 1], list) else seekTo(0L)
     }
 
     fun toggleShuffle() {
-        val next = !_uiState.value.shuffleEnabled
-        _uiState.value = _uiState.value.copy(shuffleEnabled = next)
+        _uiState.value = _uiState.value.copy(shuffleEnabled = !_uiState.value.shuffleEnabled)
     }
 
     fun cycleRepeatMode() {
-        val nextMode = when (_uiState.value.repeatMode) {
+        val next = when (_uiState.value.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
         }
-        _uiState.value = _uiState.value.copy(repeatMode = nextMode)
-    }
-
-    fun setSleepTimer(minutes: Int?) {
-        sleepTimerJob?.cancel()
-        if (minutes == null || minutes <= 0) {
-            _uiState.value = _uiState.value.copy(sleepTimerRemainingSec = null)
-            return
-        }
-        sleepTimerJob = scope.launch {
-            var remaining = minutes * 60
-            while (remaining > 0) {
-                _uiState.value = _uiState.value.copy(sleepTimerRemainingSec = remaining)
-                delay(1000L)
-                remaining--
-            }
-            mediaController?.pause()
-            _uiState.value = _uiState.value.copy(sleepTimerRemainingSec = null)
-        }
+        _uiState.value = _uiState.value.copy(repeatMode = next)
     }
 }

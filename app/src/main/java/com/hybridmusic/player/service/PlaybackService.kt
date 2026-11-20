@@ -11,10 +11,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.hybridmusic.player.HybridMusicApp
-import com.hybridmusic.player.data.remote.innertube.InnerTubeClient
+import com.hybridmusic.player.innertube.InnerTubeClient
 
 class PlaybackService : MediaSessionService() {
-
     private var mediaSession: MediaSession? = null
 
     @OptIn(UnstableApi::class)
@@ -22,7 +21,7 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val app = applicationContext as HybridMusicApp
         val okHttpFactory = OkHttpDataSource.Factory(app.container.httpClient)
-            .setUserAgent(InnerTubeClient.DEFAULT_VR_USER_AGENT)
+            .setUserAgent(InnerTubeClient.VR_USER_AGENT)
         val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
 
         val audioAttributes = AudioAttributes.Builder()
@@ -39,9 +38,7 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player).build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
-    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onDestroy() {
         mediaSession?.run {
