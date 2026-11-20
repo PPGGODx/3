@@ -1,6 +1,7 @@
 package com.hybridmusic.player.di
 
 import android.content.Context
+import com.hybridmusic.player.data.LibraryRepository
 import com.hybridmusic.player.innertube.InnerTubeClient
 import com.hybridmusic.player.player.PlayerController
 import okhttp3.Interceptor
@@ -33,6 +34,7 @@ class AppContainer(context: Context) {
         .build()
 
     val innerTubeClient: InnerTubeClient = InnerTubeClient(httpClient)
+    val libraryRepository: LibraryRepository = LibraryRepository(context.applicationContext)
     val playerController: PlayerController = PlayerController(
         context = context,
         innerTubeClient = innerTubeClient

@@ -1,5 +1,8 @@
 package com.hybridmusic.player.innertube
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class TrackItem(
     val videoId: String,
     val title: String,
@@ -8,11 +11,19 @@ data class TrackItem(
     val thumbnailUrl: String = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 )
 
+@Serializable
 data class YtPlaylistCard(
     val browseId: String,
     val title: String,
     val subtitle: String,
     val thumbnailUrl: String
+)
+
+@Serializable
+data class UserPlaylist(
+    val id: String,
+    val name: String,
+    val tracks: List<TrackItem> = emptyList()
 )
 
 data class HomeShelf(
@@ -31,6 +42,22 @@ data class HomeFeedResult(
     val moods: List<MoodChip>,
     val quickPicks: List<TrackItem>,
     val shelves: List<HomeShelf>
+)
+
+data class NextContextResult(
+    val radioTracks: List<TrackItem>,
+    val lyricsBrowseId: String?,
+    val relatedBrowseId: String?
+)
+
+data class LyricsResult(
+    val lines: List<String>,
+    val source: String
+)
+
+data class RelatedResult(
+    val tracks: List<TrackItem>,
+    val playlists: List<YtPlaylistCard>
 )
 
 data class AudioStreamInfo(
