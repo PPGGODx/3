@@ -65,5 +65,6 @@ data class AudioStreamInfo(
     val mimeType: String,
     val bitrate: Int,
     val userAgent: String,
-    val expiresAtMs: Long
+    val expiresAtMs: Long,
+    val fetchLatencyMs: Long = 0L
 )

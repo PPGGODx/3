@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.hybridmusic.player.innertube.AudioStreamInfo
 import com.hybridmusic.player.innertube.InnerTubeClient
 import com.hybridmusic.player.innertube.TrackItem
 import com.hybridmusic.player.service.PlaybackService
@@ -149,6 +150,7 @@ class PlayerController(
                         currentTrack = newTrack,
                         positionMs = 0L,
                         durationMs = newTrack.durationMs,
+                        engineBadge = "Direct Audio • Gapless 0.0s",
                         errorMessage = null
                     )
                     onAutoTrackChanged?.invoke(newTrack)
@@ -170,7 +172,7 @@ class PlayerController(
                         )
                         val ctrl = awaitMediaController()
                         if (iosStream != null && ctrl != null) {
-                            startExoPlayback(ctrl, track, iosStream.url)
+                            startExoPlayback(ctrl, track, iosStream)
                         } else {
                             switchToAdFreeEmbed(track)
                         }
@@ -216,17 +218,17 @@ class PlayerController(
             .build()
     }
 
-    private fun startExoPlayback(controller: MediaController, track: TrackItem, streamUrl: String) {
+    private fun startExoPlayback(controller: MediaController, track: TrackItem, stream: AudioStreamInfo, fromCache: Boolean = false) {
         useEmbedFallback = false
         embedEngine.stop()
-        _uiState.value = _uiState.value.copy(engineBadge = "Direct Audio • ไม่มีโฆษณา 100%")
-        controller.setMediaItem(buildMediaItem(track, streamUrl))
+        val speedTag = if (fromCache) "0.0s Cache" else "${"%.1f".format(stream.fetchLatencyMs / 1000.0)}s"
+        _uiState.value = _uiState.value.copy(engineBadge = "Direct Audio • $speedTag • ไม่มีโฆษณา")
+        controller.setMediaItem(buildMediaItem(track, stream.url))
         controller.prepare()
         controller.play()
         scheduleNextTracksPrefetch()
     }
 
-    // อัปเดตคิววิทยุเบื้องหลังโดยไม่ขัดจังหวะเพลงที่กำลังเล่นอยู่
     fun updateQueue(newQueue: List<TrackItem>) {
         if (newQueue.isEmpty()) return
         newQueue.forEach { trackLookup[it.videoId] = it }
@@ -250,11 +252,10 @@ class PlayerController(
 
         playJob?.cancel()
 
-        // Fast-Path: หากเพลงนี้ถูก Pre-fetch ไว้แล้ว ให้สั่ง ExoPlayer เล่นทันทีใน 0ms!
         val cachedStream = innerTubeClient.getCachedStream(track.videoId)
         val readyController = mediaController
         if (cachedStream != null && readyController != null) {
-            startExoPlayback(readyController, track, cachedStream.url)
+            startExoPlayback(readyController, track, cachedStream, fromCache = true)
             return
         }
 
@@ -264,7 +265,7 @@ class PlayerController(
             if (_uiState.value.currentTrack?.videoId != track.videoId) return@launch
 
             if (stream != null && controller != null) {
-                startExoPlayback(controller, track, stream.url)
+                startExoPlayback(controller, track, stream, fromCache = false)
             } else {
                 switchToAdFreeEmbed(track)
             }
@@ -287,7 +288,6 @@ class PlayerController(
         }
     }
 
-    // ดึงสตรีมเพลงถัดไป 2 เพลงล่วงหน้า + ใส่เพลงถัดไปเข้า ExoPlayer Timeline เพื่อบัฟเฟอร์รอแบบไร้รอยต่อ
     private fun scheduleNextTracksPrefetch() {
         prefetchJob?.cancel()
         val snapshot = _uiState.value
@@ -369,7 +369,6 @@ class PlayerController(
         val nextTrack = computeNextTrack(state) ?: return
         val ctrl = mediaController
 
-        // หาก ExoPlayer บัฟเฟอร์เพลงถัดไปรอไว้แล้ว ให้ข้ามไปเล่นทันทีแบบไร้รอยต่อ!
         if (!useEmbedFallback && ctrl != null && ctrl.hasNextMediaItem()) {
             val nextItem = ctrl.getMediaItemAt(ctrl.nextMediaItemIndex)
             if (nextItem.mediaId == nextTrack.videoId) {
@@ -377,6 +376,7 @@ class PlayerController(
                     currentTrack = nextTrack,
                     positionMs = 0L,
                     durationMs = nextTrack.durationMs,
+                    engineBadge = "Direct Audio • Gapless 0.0s",
                     errorMessage = null
                 )
                 ctrl.seekToNextMediaItem()

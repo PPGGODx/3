@@ -1,5 +1,6 @@
 package com.hybridmusic.player.innertube
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -20,6 +21,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class InnerTubeClient(
     private val httpClient: OkHttpClient
@@ -31,12 +33,16 @@ class InnerTubeClient(
 
     private val streamCache = ConcurrentHashMap<String, AudioStreamInfo>()
 
+    @Volatile
+    private var cachedVisitorData: String? = null
+
     companion object {
         private const val YTM_SEARCH_URL = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
         private const val YTM_BROWSE_URL = "https://music.youtube.com/youtubei/v1/browse?prettyPrint=false"
         private const val YTM_NEXT_URL = "https://music.youtube.com/youtubei/v1/next?prettyPrint=false"
         private const val YTM_SUGGEST_URL = "https://music.youtube.com/youtubei/v1/music/get_search_suggestions?prettyPrint=false"
         private const val YT_PLAYER_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
+        private const val YT_VISITOR_URL = "https://www.youtube.com/youtubei/v1/visitor_id?prettyPrint=false"
 
         private const val SONG_FILTER_PARAMS = "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D"
         private const val PLAYLIST_FILTER_PARAMS = "EgeKAQQoAEABagoQAxAEEAkQChAF"
@@ -70,14 +76,42 @@ class InnerTubeClient(
     private fun JsonElement?.asInt(): Int? = (this as? JsonPrimitive)?.intOrNull
 
     suspend fun prewarmConnections() = withContext(Dispatchers.IO) {
-        runCatching {
-            val req = Request.Builder()
-                .url("https://www.youtube.com/generate_204")
-                .header("User-Agent", VR_USER_AGENT)
-                .head()
-                .build()
-            httpClient.newCall(req).execute().close()
-        }
+        ensureVisitorData()
+    }
+
+    private fun ensureVisitorData(): String? {
+        cachedVisitorData?.let { return it }
+        val payload = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    put("clientName", "ANDROID_VR")
+                    put("clientVersion", "1.71.26")
+                    put("osName", "Android")
+                    put("osVersion", "14")
+                    put("hl", "th")
+                    put("gl", "TH")
+                }
+            }
+        }.toString()
+
+        val req = Request.Builder()
+            .url(YT_VISITOR_URL)
+            .header("User-Agent", VR_USER_AGENT)
+            .header("X-YouTube-Client-Name", "28")
+            .header("X-YouTube-Client-Version", "1.71.26")
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        return runCatching {
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).asObj() ?: return null
+                val vd = root["responseContext"].asObj()?.get("visitorData").asStr()
+                if (!vd.isNullOrBlank()) cachedVisitorData = vd
+                vd
+            }
+        }.getOrNull()
     }
 
     fun getCachedStream(videoId: String): AudioStreamInfo? {
@@ -100,7 +134,13 @@ class InnerTubeClient(
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 val body = resp.body?.string() ?: return null
-                json.parseToJsonElement(body)
+                val parsed = json.parseToJsonElement(body)
+                if (cachedVisitorData == null) {
+                    parsed.asObj()?.get("responseContext").asObj()?.get("visitorData").asStr()?.let {
+                        if (it.isNotBlank()) cachedVisitorData = it
+                    }
+                }
+                parsed
             }
         }.getOrNull()
     }
@@ -533,7 +573,7 @@ class InnerTubeClient(
         }.getOrNull()
     }
 
-    // ดึงสตรีมแบบ 1-Hop ทันที (ไม่ยิงซ้ำซ้อน ไม่รอ verify HTTP GET)
+    // ยิงขอสตรีมจาก ANDROID_VR และ IOS แข่งกันพร้อมกัน (Parallel Race) เอาตัวที่ตอบกลับไวที่สุดทันที
     suspend fun getCleanAudioStream(
         videoId: String,
         forceRefresh: Boolean = false,
@@ -545,17 +585,44 @@ class InnerTubeClient(
             streamCache.remove(videoId)
         }
 
+        val startMs = System.currentTimeMillis()
         val stream = if (preferIos) {
-            fetchIosAudio(videoId) ?: fetchAndroidVrAudio(videoId)
+            fetchIosAudio(videoId)
         } else {
-            fetchAndroidVrAudio(videoId) ?: fetchIosAudio(videoId)
+            raceAudioClients(videoId)
         }
 
         if (stream != null) {
-            streamCache[videoId] = stream
-            urlUserAgentMap[stream.url] = stream.userAgent
+            val latency = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
+            val measured = stream.copy(fetchLatencyMs = latency)
+            streamCache[videoId] = measured
+            urlUserAgentMap[measured.url] = measured.userAgent
+            measured
+        } else {
+            null
         }
-        stream
+    }
+
+    private suspend fun raceAudioClients(videoId: String): AudioStreamInfo? = coroutineScope {
+        val winner = CompletableDeferred<AudioStreamInfo?>()
+        val finished = AtomicInteger(0)
+
+        val jobs = listOf(
+            async(Dispatchers.IO) {
+                val res = fetchAndroidVrAudio(videoId)
+                if (res != null) winner.complete(res)
+                if (finished.incrementAndGet() == 2 && !winner.isCompleted) winner.complete(null)
+            },
+            async(Dispatchers.IO) {
+                val res = fetchIosAudio(videoId)
+                if (res != null) winner.complete(res)
+                if (finished.incrementAndGet() == 2 && !winner.isCompleted) winner.complete(null)
+            }
+        )
+
+        val chosen = winner.await()
+        jobs.forEach { if (it.isActive) it.cancel() }
+        chosen
     }
 
     fun invalidateCache(videoId: String) {
@@ -563,6 +630,7 @@ class InnerTubeClient(
     }
 
     private fun fetchAndroidVrAudio(videoId: String): AudioStreamInfo? {
+        val vd = cachedVisitorData
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
@@ -575,16 +643,18 @@ class InnerTubeClient(
                     put("androidSdkVersion", 34)
                     put("hl", "th")
                     put("gl", "TH")
+                    if (!vd.isNullOrBlank()) put("visitorData", vd)
                 }
             }
             put("videoId", videoId)
             put("contentCheckOk", true)
             put("racyCheckOk", true)
         }.toString()
-        return parseAudioOnlyStream(payload, VR_USER_AGENT, "28", "1.71.26")
+        return parseAudioOnlyStream(payload, VR_USER_AGENT, "28", "1.71.26", vd)
     }
 
     private fun fetchIosAudio(videoId: String): AudioStreamInfo? {
+        val vd = cachedVisitorData
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
@@ -596,27 +666,33 @@ class InnerTubeClient(
                     put("osVersion", "18.3.2.22D82")
                     put("hl", "th")
                     put("gl", "TH")
+                    if (!vd.isNullOrBlank()) put("visitorData", vd)
                 }
             }
             put("videoId", videoId)
             put("contentCheckOk", true)
             put("racyCheckOk", true)
         }.toString()
-        return parseAudioOnlyStream(payload, IOS_USER_AGENT, "5", "20.10.4")
+        return parseAudioOnlyStream(payload, IOS_USER_AGENT, "5", "20.10.4", vd)
     }
 
     private fun parseAudioOnlyStream(
         payload: String,
         userAgent: String,
         clientNameId: String,
-        clientVersion: String
+        clientVersion: String,
+        visitorData: String?
     ): AudioStreamInfo? {
-        val req = Request.Builder()
+        val builder = Request.Builder()
             .url(YT_PLAYER_URL)
             .header("User-Agent", userAgent)
             .header("X-YouTube-Client-Name", clientNameId)
             .header("X-YouTube-Client-Version", clientVersion)
             .header("X-Goog-Api-Format-Version", "2")
+        if (!visitorData.isNullOrBlank()) {
+            builder.header("X-Goog-Visitor-Id", visitorData)
+        }
+        val req = builder
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
@@ -632,7 +708,9 @@ class InnerTubeClient(
                 val expiresIn = streamingData["expiresInSeconds"].asLong() ?: 3600L
                 val formats = streamingData["adaptiveFormats"].asArr() ?: return null
 
-                var bestMp4: AudioStreamInfo? = null
+                // เลือกสตรีมเสียง AAC/M4A ระดับ ~128-160kbps เป็นหลักเพื่อเริ่มเล่นไวสุดและเสียงใส
+                var standardMp4: AudioStreamInfo? = null
+                var fallbackMp4: AudioStreamInfo? = null
                 var bestAny: AudioStreamInfo? = null
 
                 for (el in formats) {
@@ -651,10 +729,19 @@ class InnerTubeClient(
                         userAgent = userAgent,
                         expiresAtMs = System.currentTimeMillis() + expiresIn * 1000L
                     )
-                    if (mime.startsWith("audio/mp4") && (bestMp4 == null || bitrate > bestMp4.bitrate)) bestMp4 = info
-                    if (bestAny == null || bitrate > bestAny.bitrate) bestAny = info
+                    if (mime.startsWith("audio/mp4")) {
+                        if (bitrate in 96_000..170_000 && (standardMp4 == null || bitrate > standardMp4.bitrate)) {
+                            standardMp4 = info
+                        }
+                        if (fallbackMp4 == null || bitrate > fallbackMp4.bitrate) {
+                            fallbackMp4 = info
+                        }
+                    }
+                    if (bestAny == null || bitrate > bestAny.bitrate) {
+                        bestAny = info
+                    }
                 }
-                bestMp4 ?: bestAny
+                standardMp4 ?: fallbackMp4 ?: bestAny
             }
         }.getOrNull()
     }
