@@ -4,6 +4,7 @@ import android.content.Context
 import com.hybridmusic.player.data.LibraryRepository
 import com.hybridmusic.player.innertube.InnerTubeClient
 import com.hybridmusic.player.player.PlayerController
+import okhttp3.ConnectionPool
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -26,9 +27,10 @@ class AppContainer(context: Context) {
     }
 
     val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
         .addNetworkInterceptor(streamNetworkInterceptor)
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(35, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()

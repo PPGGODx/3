@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -24,6 +25,17 @@ class PlaybackService : MediaSessionService() {
             .setUserAgent(InnerTubeClient.VR_USER_AGENT)
         val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
 
+        // ลดเกณฑ์บัฟเฟอร์เริ่มต้นเหลือ 450ms เพื่อให้เพลงเปล่งเสียงทันทีที่กดเล่น
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000,
+                50_000,
+                450,
+                1_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
@@ -31,6 +43,7 @@ class PlaybackService : MediaSessionService() {
 
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()

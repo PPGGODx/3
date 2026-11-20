@@ -15,6 +15,7 @@ import com.hybridmusic.player.innertube.YtMusicLinkParser
 import com.hybridmusic.player.innertube.YtPlaylistCard
 import com.hybridmusic.player.player.PlaybackUiState
 import com.hybridmusic.player.player.PlayerController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,7 +75,6 @@ class MainViewModel(
     private val _searchSuggestions = MutableStateFlow<List<String>>(emptyList())
     val searchSuggestions: StateFlow<List<String>> = _searchSuggestions.asStateFlow()
 
-    // 0 = เพลง, 1 = เพลย์ลิสต์, 2 = อัลบั้ม
     private val _searchFilterIndex = MutableStateFlow(0)
     val searchFilterIndex: StateFlow<Int> = _searchFilterIndex.asStateFlow()
 
@@ -130,6 +130,11 @@ class MainViewModel(
     )
 
     init {
+        viewModelScope.launch { innerTubeClient.prewarmConnections() }
+        playerController.onAutoTrackChanged = { newTrack ->
+            libraryRepository.recordRecent(newTrack)
+            fetchTrackMetadataContext(newTrack, updateRadioQueue = false)
+        }
         loadHomeFeed(0)
     }
 
@@ -158,6 +163,13 @@ class MainViewModel(
             val feed = innerTubeClient.fetchHomeFeed(if (moodIndex == 0) null else mood)
             _homeFeed.value = feed
             _isLoadingHome.value = false
+
+            // อุ่นสตรีมเพลง Quick Picks 3 เพลงแรกไว้ล่วงหน้าเพื่อให้กดเล่นได้ทันที
+            launch(Dispatchers.IO) {
+                feed.quickPicks.take(3).forEach { track ->
+                    innerTubeClient.getCleanAudioStream(track.videoId)
+                }
+            }
         }
     }
 
@@ -166,18 +178,22 @@ class MainViewModel(
         val initialQueue = if (baseQueue.isEmpty() || forceRadio) listOf(track) else baseQueue
         playerController.playTrack(track, initialQueue)
 
+        val shouldPopulateRadio = forceRadio || (_autoplayRadioEnabled.value && initialQueue.size <= 1)
+        fetchTrackMetadataContext(track, updateRadioQueue = shouldPopulateRadio)
+    }
+
+    private fun fetchTrackMetadataContext(track: TrackItem, updateRadioQueue: Boolean) {
         contextFetchJob?.cancel()
         contextFetchJob = viewModelScope.launch {
             _isLoadingLyrics.value = true
             _isLoadingRelated.value = true
 
             val nextCtx = innerTubeClient.fetchNextContext(track.videoId)
-            if ((forceRadio || (_autoplayRadioEnabled.value && initialQueue.size <= 1)) && nextCtx.radioTracks.isNotEmpty()) {
+            if (updateRadioQueue && nextCtx.radioTracks.isNotEmpty()) {
                 val merged = listOf(track) + nextCtx.radioTracks.filter { it.videoId != track.videoId }
-                val currentPlaying = playerController.uiState.value.currentTrack
-                if (currentPlaying?.videoId == track.videoId) {
-                    // อัปเดตคิวสถานีวิทยุเบื้องหลังโดยไม่ขัดจังหวะเพลงที่กำลังเล่น
-                    playerController.playTrack(track, merged)
+                if (playerController.uiState.value.currentTrack?.videoId == track.videoId) {
+                    // อัปเดตคิววิทยุและเริ่ม Pre-fetch เพลงถัดไปทันทีโดยไม่สะดุดเพลงปัจจุบัน
+                    playerController.updateQueue(merged)
                 }
             }
 
@@ -246,7 +262,7 @@ class MainViewModel(
             return
         }
         suggestionJob = viewModelScope.launch {
-            delay(280L)
+            delay(250L)
             _searchSuggestions.value = innerTubeClient.fetchSearchSuggestions(newQuery)
         }
     }
@@ -291,7 +307,14 @@ class MainViewModel(
                 _statusBanner.value = "ไม่พบรหัสเพลงหรือเพลย์ลิสต์ในลิงก์นี้"
             } else {
                 when (_searchFilterIndex.value) {
-                    0 -> _searchSongsResult.value = innerTubeClient.searchSongs(raw)
+                    0 -> {
+                        val songs = innerTubeClient.searchSongs(raw)
+                        _searchSongsResult.value = songs
+                        // Pre-fetch เพลงแรกของผลการค้นหาทันที
+                        songs.firstOrNull()?.let { first ->
+                            launch(Dispatchers.IO) { innerTubeClient.getCleanAudioStream(first.videoId) }
+                        }
+                    }
                     1 -> _searchPlaylistsResult.value = innerTubeClient.searchPlaylists(raw, albumsOnly = false)
                     2 -> _searchPlaylistsResult.value = innerTubeClient.searchPlaylists(raw, albumsOnly = true)
                 }

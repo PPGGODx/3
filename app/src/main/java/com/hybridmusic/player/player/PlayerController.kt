@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
 data class PlaybackUiState(
@@ -48,7 +50,14 @@ class PlayerController(
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
     private var progressJob: Job? = null
+    private var playJob: Job? = null
+    private var prefetchJob: Job? = null
     private var useEmbedFallback = false
+    private var retriedWithIosVideoId: String? = null
+
+    private val trackLookup = ConcurrentHashMap<String, TrackItem>()
+
+    var onAutoTrackChanged: ((TrackItem) -> Unit)? = null
 
     private val _uiState = MutableStateFlow(PlaybackUiState())
     val uiState: StateFlow<PlaybackUiState> = _uiState.asStateFlow()
@@ -131,10 +140,44 @@ class PlayerController(
                 }
             }
 
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (useEmbedFallback || mediaItem == null) return
+                val newTrack = trackLookup[mediaItem.mediaId] ?: return
+                val prevId = _uiState.value.currentTrack?.videoId
+                if (newTrack.videoId != prevId) {
+                    _uiState.value = _uiState.value.copy(
+                        currentTrack = newTrack,
+                        positionMs = 0L,
+                        durationMs = newTrack.durationMs,
+                        errorMessage = null
+                    )
+                    onAutoTrackChanged?.invoke(newTrack)
+                    scheduleNextTracksPrefetch()
+                }
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 val track = _uiState.value.currentTrack ?: return
                 innerTubeClient.invalidateCache(track.videoId)
-                switchToAdFreeEmbed(track)
+                if (retriedWithIosVideoId != track.videoId) {
+                    retriedWithIosVideoId = track.videoId
+                    playJob?.cancel()
+                    playJob = scope.launch {
+                        val iosStream = innerTubeClient.getCleanAudioStream(
+                            videoId = track.videoId,
+                            forceRefresh = true,
+                            preferIos = true
+                        )
+                        val ctrl = awaitMediaController()
+                        if (iosStream != null && ctrl != null) {
+                            startExoPlayback(ctrl, track, iosStream.url)
+                        } else {
+                            switchToAdFreeEmbed(track)
+                        }
+                    }
+                } else {
+                    switchToAdFreeEmbed(track)
+                }
             }
         })
     }
@@ -153,48 +196,125 @@ class PlayerController(
                         }
                     }
                 }
-                delay(400L)
+                delay(350L)
             }
         }
     }
 
-    fun playTrack(track: TrackItem, queue: List<TrackItem> = listOf(track)) {
-        scope.launch {
-            val normalizedQueue = if (queue.any { it.videoId == track.videoId }) queue else listOf(track) + queue
-            _uiState.value = _uiState.value.copy(
-                currentTrack = track,
-                queue = normalizedQueue,
-                isBuffering = true,
-                positionMs = 0L,
-                durationMs = track.durationMs,
-                errorMessage = null
-            )
+    private fun buildMediaItem(track: TrackItem, streamUrl: String): MediaItem {
+        trackLookup[track.videoId] = track
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artist)
+            .setArtworkUri(Uri.parse(track.thumbnailUrl))
+            .build()
 
+        return MediaItem.Builder()
+            .setMediaId(track.videoId)
+            .setUri(Uri.parse(streamUrl))
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
+    private fun startExoPlayback(controller: MediaController, track: TrackItem, streamUrl: String) {
+        useEmbedFallback = false
+        embedEngine.stop()
+        _uiState.value = _uiState.value.copy(engineBadge = "Direct Audio • ไม่มีโฆษณา 100%")
+        controller.setMediaItem(buildMediaItem(track, streamUrl))
+        controller.prepare()
+        controller.play()
+        scheduleNextTracksPrefetch()
+    }
+
+    // อัปเดตคิววิทยุเบื้องหลังโดยไม่ขัดจังหวะเพลงที่กำลังเล่นอยู่
+    fun updateQueue(newQueue: List<TrackItem>) {
+        if (newQueue.isEmpty()) return
+        newQueue.forEach { trackLookup[it.videoId] = it }
+        _uiState.value = _uiState.value.copy(queue = newQueue)
+        scheduleNextTracksPrefetch()
+    }
+
+    fun playTrack(track: TrackItem, queue: List<TrackItem> = listOf(track)) {
+        val normalizedQueue = if (queue.any { it.videoId == track.videoId }) queue else listOf(track) + queue
+        normalizedQueue.forEach { trackLookup[it.videoId] = it }
+        retriedWithIosVideoId = null
+
+        _uiState.value = _uiState.value.copy(
+            currentTrack = track,
+            queue = normalizedQueue,
+            isBuffering = true,
+            positionMs = 0L,
+            durationMs = track.durationMs,
+            errorMessage = null
+        )
+
+        playJob?.cancel()
+
+        // Fast-Path: หากเพลงนี้ถูก Pre-fetch ไว้แล้ว ให้สั่ง ExoPlayer เล่นทันทีใน 0ms!
+        val cachedStream = innerTubeClient.getCachedStream(track.videoId)
+        val readyController = mediaController
+        if (cachedStream != null && readyController != null) {
+            startExoPlayback(readyController, track, cachedStream.url)
+            return
+        }
+
+        playJob = scope.launch {
             val stream = innerTubeClient.getCleanAudioStream(track.videoId)
             val controller = awaitMediaController()
+            if (_uiState.value.currentTrack?.videoId != track.videoId) return@launch
 
             if (stream != null && controller != null) {
-                useEmbedFallback = false
-                embedEngine.stop()
-                _uiState.value = _uiState.value.copy(engineBadge = "Direct Audio • ไม่มีโฆษณา 100%")
-
-                val metadata = MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .setArtworkUri(Uri.parse(track.thumbnailUrl))
-                    .build()
-
-                val mediaItem = MediaItem.Builder()
-                    .setMediaId(track.videoId)
-                    .setUri(Uri.parse(stream.url))
-                    .setMediaMetadata(metadata)
-                    .build()
-
-                controller.setMediaItem(mediaItem)
-                controller.prepare()
-                controller.play()
+                startExoPlayback(controller, track, stream.url)
             } else {
                 switchToAdFreeEmbed(track)
+            }
+        }
+    }
+
+    private fun computeNextTrack(state: PlaybackUiState = _uiState.value): TrackItem? {
+        val current = state.currentTrack ?: return null
+        val list = state.queue
+        if (list.isEmpty()) return null
+        val idx = list.indexOfFirst { it.videoId == current.videoId }
+        return if (state.shuffleEnabled && list.size > 1) {
+            list.filter { it.videoId != current.videoId }.random()
+        } else if (idx in 0 until list.lastIndex) {
+            list[idx + 1]
+        } else if (state.repeatMode == Player.REPEAT_MODE_ALL) {
+            list.first()
+        } else {
+            null
+        }
+    }
+
+    // ดึงสตรีมเพลงถัดไป 2 เพลงล่วงหน้า + ใส่เพลงถัดไปเข้า ExoPlayer Timeline เพื่อบัฟเฟอร์รอแบบไร้รอยต่อ
+    private fun scheduleNextTracksPrefetch() {
+        prefetchJob?.cancel()
+        val snapshot = _uiState.value
+        val next1 = computeNextTrack(snapshot) ?: return
+        val next1Idx = snapshot.queue.indexOfFirst { it.videoId == next1.videoId }
+        val next2 = if (next1Idx in 0 until snapshot.queue.lastIndex) snapshot.queue[next1Idx + 1] else null
+
+        prefetchJob = scope.launch(Dispatchers.IO) {
+            val stream1 = innerTubeClient.getCleanAudioStream(next1.videoId)
+            if (stream1 != null) {
+                withContext(Dispatchers.Main) {
+                    val ctrl = mediaController
+                    if (!useEmbedFallback && ctrl != null && computeNextTrack()?.videoId == next1.videoId) {
+                        val curIdx = ctrl.currentMediaItemIndex
+                        val hasExpectedNext = ctrl.mediaItemCount > curIdx + 1 &&
+                            ctrl.getMediaItemAt(curIdx + 1).mediaId == next1.videoId
+                        if (!hasExpectedNext) {
+                            if (ctrl.mediaItemCount > curIdx + 1) {
+                                ctrl.removeMediaItems(curIdx + 1, ctrl.mediaItemCount)
+                            }
+                            ctrl.addMediaItem(buildMediaItem(next1, stream1.url))
+                        }
+                    }
+                }
+            }
+            if (next2 != null && next2.videoId != next1.videoId) {
+                innerTubeClient.getCleanAudioStream(next2.videoId)
             }
         }
     }
@@ -239,23 +359,34 @@ class PlayerController(
 
     fun playNextInQueue() {
         val state = _uiState.value
-        val current = state.currentTrack ?: return
+        if (state.currentTrack == null) return
         if (state.repeatMode == Player.REPEAT_MODE_ONE) {
             seekTo(0L)
             if (useEmbedFallback) embedEngine.play() else mediaController?.play()
             return
         }
-        val list = state.queue
-        if (list.isEmpty()) return
-        val idx = list.indexOfFirst { it.videoId == current.videoId }
-        val nextTrack = if (state.shuffleEnabled && list.size > 1) {
-            list.filter { it.videoId != current.videoId }.random()
-        } else if (idx in 0 until list.lastIndex) {
-            list[idx + 1]
-        } else if (state.repeatMode == Player.REPEAT_MODE_ALL) {
-            list.first()
-        } else return
-        playTrack(nextTrack, list)
+
+        val nextTrack = computeNextTrack(state) ?: return
+        val ctrl = mediaController
+
+        // หาก ExoPlayer บัฟเฟอร์เพลงถัดไปรอไว้แล้ว ให้ข้ามไปเล่นทันทีแบบไร้รอยต่อ!
+        if (!useEmbedFallback && ctrl != null && ctrl.hasNextMediaItem()) {
+            val nextItem = ctrl.getMediaItemAt(ctrl.nextMediaItemIndex)
+            if (nextItem.mediaId == nextTrack.videoId) {
+                _uiState.value = state.copy(
+                    currentTrack = nextTrack,
+                    positionMs = 0L,
+                    durationMs = nextTrack.durationMs,
+                    errorMessage = null
+                )
+                ctrl.seekToNextMediaItem()
+                ctrl.play()
+                scheduleNextTracksPrefetch()
+                return
+            }
+        }
+
+        playTrack(nextTrack, state.queue)
     }
 
     fun playPreviousInQueue() {
@@ -272,6 +403,7 @@ class PlayerController(
 
     fun toggleShuffle() {
         _uiState.value = _uiState.value.copy(shuffleEnabled = !_uiState.value.shuffleEnabled)
+        scheduleNextTracksPrefetch()
     }
 
     fun cycleRepeatMode() {
@@ -281,5 +413,6 @@ class PlayerController(
             else -> Player.REPEAT_MODE_OFF
         }
         _uiState.value = _uiState.value.copy(repeatMode = next)
+        scheduleNextTracksPrefetch()
     }
 }

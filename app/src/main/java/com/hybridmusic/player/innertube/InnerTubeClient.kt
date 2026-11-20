@@ -69,6 +69,22 @@ class InnerTubeClient(
     private fun JsonElement?.asLong(): Long? = (this as? JsonPrimitive)?.longOrNull
     private fun JsonElement?.asInt(): Int? = (this as? JsonPrimitive)?.intOrNull
 
+    suspend fun prewarmConnections() = withContext(Dispatchers.IO) {
+        runCatching {
+            val req = Request.Builder()
+                .url("https://www.youtube.com/generate_204")
+                .header("User-Agent", VR_USER_AGENT)
+                .head()
+                .build()
+            httpClient.newCall(req).execute().close()
+        }
+    }
+
+    fun getCachedStream(videoId: String): AudioStreamInfo? {
+        val cached = streamCache[videoId] ?: return null
+        return if (cached.expiresAtMs > System.currentTimeMillis() + 90_000L) cached else null
+    }
+
     private fun postYtmWebRemix(url: String, payload: String): JsonElement? {
         val req = Request.Builder()
             .url(url)
@@ -517,45 +533,33 @@ class InnerTubeClient(
         }.getOrNull()
     }
 
-    suspend fun getCleanAudioStream(videoId: String, forceRefresh: Boolean = false): AudioStreamInfo? =
-        withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            if (!forceRefresh) {
-                streamCache[videoId]?.let { cached ->
-                    if (cached.expiresAtMs > now + 90_000L) return@withContext cached
-                }
-            } else {
-                streamCache.remove(videoId)
-            }
-
-            val candidates = listOfNotNull(fetchAndroidVrAudio(videoId), fetchIosAudio(videoId))
-            for (stream in candidates) {
-                if (verifyStreamReachable(stream)) {
-                    streamCache[videoId] = stream
-                    urlUserAgentMap[stream.url] = stream.userAgent
-                    return@withContext stream
-                }
-            }
-            null
+    // ดึงสตรีมแบบ 1-Hop ทันที (ไม่ยิงซ้ำซ้อน ไม่รอ verify HTTP GET)
+    suspend fun getCleanAudioStream(
+        videoId: String,
+        forceRefresh: Boolean = false,
+        preferIos: Boolean = false
+    ): AudioStreamInfo? = withContext(Dispatchers.IO) {
+        if (!forceRefresh) {
+            getCachedStream(videoId)?.let { return@withContext it }
+        } else {
+            streamCache.remove(videoId)
         }
+
+        val stream = if (preferIos) {
+            fetchIosAudio(videoId) ?: fetchAndroidVrAudio(videoId)
+        } else {
+            fetchAndroidVrAudio(videoId) ?: fetchIosAudio(videoId)
+        }
+
+        if (stream != null) {
+            streamCache[videoId] = stream
+            urlUserAgentMap[stream.url] = stream.userAgent
+        }
+        stream
+    }
 
     fun invalidateCache(videoId: String) {
         streamCache.remove(videoId)
-    }
-
-    private fun verifyStreamReachable(stream: AudioStreamInfo): Boolean {
-        return runCatching {
-            val req = Request.Builder()
-                .url(stream.url)
-                .header("User-Agent", stream.userAgent)
-                .header("Range", "bytes=0-1023")
-                .get()
-                .build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (resp.code != 200 && resp.code != 206) return@runCatching false
-                (resp.body?.byteStream()?.read() ?: -1) != -1
-            }
-        }.getOrDefault(false)
     }
 
     private fun fetchAndroidVrAudio(videoId: String): AudioStreamInfo? {
