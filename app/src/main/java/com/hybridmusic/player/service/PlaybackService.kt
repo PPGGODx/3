@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.hybridmusic.player.HybridMusicApp
+import com.hybridmusic.player.data.remote.innertube.InnerTubeClient
 
 class PlaybackService : MediaSessionService() {
 
@@ -19,24 +20,23 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        runCatching {
-            val app = applicationContext as HybridMusicApp
-            val okHttpFactory = OkHttpDataSource.Factory(app.container.httpClient)
-            val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
+        val app = applicationContext as HybridMusicApp
+        val okHttpFactory = OkHttpDataSource.Factory(app.container.httpClient)
+            .setUserAgent(InnerTubeClient.DEFAULT_VR_USER_AGENT)
+        val dataSourceFactory = DefaultDataSource.Factory(this, okHttpFactory)
 
-            val audioAttributes = AudioAttributes.Builder()
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .setUsage(C.USAGE_MEDIA)
-                .build()
+        val audioAttributes = AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
 
-            val player = ExoPlayer.Builder(this)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-                .setAudioAttributes(audioAttributes, true)
-                .setHandleAudioBecomingNoisy(true)
-                .build()
+        val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
 
-            mediaSession = MediaSession.Builder(this, player).build()
-        }
+        mediaSession = MediaSession.Builder(this, player).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {

@@ -32,78 +32,42 @@ class InnerTubeClient(
 
     private val streamCache = ConcurrentHashMap<String, AudioStreamInfo>()
 
-    @Volatile
-    private var cachedVisitorData: String? = null
-
     companion object {
         private const val YTM_SEARCH_URL =
             "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
         private const val YT_PLAYER_URL =
             "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
-        private const val YTM_PLAYER_URL =
-            "https://music.youtube.com/youtubei/v1/player?prettyPrint=false"
-        private const val YTM_VISITOR_URL =
-            "https://music.youtube.com/youtubei/v1/visitor_id?prettyPrint=false"
         private const val SONG_FILTER_PARAMS = "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D"
 
         private val urlUserAgentMap = ConcurrentHashMap<String, String>()
 
         const val DEFAULT_VR_USER_AGENT =
-            "com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 14; eureka-user Build/UP1A.231005.007) gzip"
-        const val DEFAULT_ANDROID_USER_AGENT =
-            "com.google.android.youtube/20.14.2 (Linux; U; Android 14; en_US) gzip"
-        const val DEFAULT_IOS_USER_AGENT =
-            "com.google.ios.youtube/20.14.2 (iPhone16,2; U; CPU iOS 18_4 like Mac OS X;)"
-        const val DEFAULT_TV_USER_AGENT =
-            "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version"
-        const val DEFAULT_WEB_USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+            "com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 14; eureka-user Build/UP1A.231005.007.A1) gzip"
+
+        private const val CREATOR_USER_AGENT =
+            "com.google.android.apps.youtube.creator/24.47.100 (Linux; U; Android 14; Pixel 8 Build/UP1A.231005.007) gzip"
+
+        private const val TESTSUITE_USER_AGENT =
+            "com.google.android.youtube/1.9 (Linux; U; Android 11; eng.build) gzip"
+
+        private const val TV_USER_AGENT =
+            "Mozilla/5.0 (PlayStation; PlayStation 5/9.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15"
+
+        private const val WEB_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 
         fun resolveUserAgentForUrl(url: String): String {
             urlUserAgentMap[url]?.let { return it }
             val cParam = Regex("[?&]c=([^&]+)").find(url)?.groupValues?.getOrNull(1) ?: ""
             return when {
                 cParam.contains("ANDROID_VR", ignoreCase = true) -> DEFAULT_VR_USER_AGENT
-                cParam.equals("ANDROID", ignoreCase = true) -> DEFAULT_ANDROID_USER_AGENT
-                cParam.contains("IOS", ignoreCase = true) -> DEFAULT_IOS_USER_AGENT
-                cParam.contains("TVHTML5", ignoreCase = true) -> DEFAULT_TV_USER_AGENT
-                cParam.contains("WEB", ignoreCase = true) -> DEFAULT_WEB_USER_AGENT
+                cParam.contains("ANDROID_CREATOR", ignoreCase = true) -> CREATOR_USER_AGENT
+                cParam.contains("ANDROID_TESTSUITE", ignoreCase = true) -> TESTSUITE_USER_AGENT
+                cParam.contains("TVHTML5", ignoreCase = true) -> TV_USER_AGENT
+                cParam.contains("WEB", ignoreCase = true) -> WEB_USER_AGENT
                 else -> DEFAULT_VR_USER_AGENT
             }
         }
-    }
-
-    private fun getOrFetchVisitorData(): String? {
-        cachedVisitorData?.let { return it }
-        val payload = buildJsonObject {
-            putJsonObject("context") {
-                putJsonObject("client") {
-                    put("clientName", "WEB_REMIX")
-                    put("clientVersion", "1.20260301.01.00")
-                }
-            }
-        }.toString()
-
-        val req = Request.Builder()
-            .url(YTM_VISITOR_URL)
-            .header("User-Agent", DEFAULT_WEB_USER_AGENT)
-            .header("Origin", "https://music.youtube.com")
-            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-
-        return runCatching {
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@runCatching null
-                val body = resp.body?.string() ?: return@runCatching null
-                val root = json.parseToJsonElement(body).jsonObject
-                val vd = root["responseContext"]?.jsonObject
-                    ?.get("visitorData")?.jsonPrimitive?.contentOrNull
-                if (!vd.isNullOrBlank()) {
-                    cachedVisitorData = vd
-                }
-                vd
-            }
-        }.getOrNull()
     }
 
     suspend fun searchSongs(query: String): List<TrackItem> = withContext(Dispatchers.IO) {
@@ -113,7 +77,7 @@ class InnerTubeClient(
             putJsonObject("context") {
                 putJsonObject("client") {
                     put("clientName", "WEB_REMIX")
-                    put("clientVersion", "1.20260301.01.00")
+                    put("clientVersion", "1.20250310.01.00")
                     put("hl", "th")
                     put("gl", "TH")
                 }
@@ -124,11 +88,11 @@ class InnerTubeClient(
 
         val request = Request.Builder()
             .url(YTM_SEARCH_URL)
-            .header("User-Agent", DEFAULT_WEB_USER_AGENT)
+            .header("User-Agent", WEB_USER_AGENT)
             .header("Origin", "https://music.youtube.com")
             .header("Referer", "https://music.youtube.com/")
             .header("X-YouTube-Client-Name", "67")
-            .header("X-YouTube-Client-Version", "1.20260301.01.00")
+            .header("X-YouTube-Client-Version", "1.20250310.01.00")
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
@@ -147,33 +111,29 @@ class InnerTubeClient(
             val now = System.currentTimeMillis()
             if (!forceRefresh) {
                 streamCache[videoId]?.let { cached ->
-                    if (cached.expiresAtMs > now + 90_000L && verifyStreamReachable(cached)) {
+                    if (cached.expiresAtMs > now + 90_000L) {
                         return@withContext cached
                     }
                 }
+            } else {
+                streamCache.remove(videoId)
             }
-            streamCache.remove(videoId)
 
-            val visitorData = getOrFetchVisitorData()
-
-            val fetchers: List<() -> AudioStreamInfo?> = listOf(
-                { fetchAndroidVrStream(videoId, visitorData) },
-                { fetchIosStream(videoId, visitorData) },
-                { fetchAndroidMobileStream(videoId, visitorData) },
-                { fetchTvEmbeddedStream(videoId, visitorData) },
-                { fetchWebEmbeddedStream(videoId, visitorData) },
-                { fetchPipedFallbackStream(videoId) },
-                { fetchInvidiousFallbackStream(videoId) }
+            val clients = listOf(
+                { fetchAndroidVrStream(videoId) },
+                { fetchAndroidCreatorStream(videoId) },
+                { fetchAndroidTestsuiteStream(videoId) },
+                { fetchTvHtml5Stream(videoId) },
+                { fetchWebEmbeddedStream(videoId) }
             )
 
-            for (fetcher in fetchers) {
-                val candidate = runCatching { fetcher() }.getOrNull() ?: continue
+            for (fetcher in clients) {
+                val candidate = fetcher() ?: continue
                 if (verifyStreamReachable(candidate)) {
                     cacheStream(videoId, candidate)
                     return@withContext candidate
                 }
             }
-
             null
         }
 
@@ -188,38 +148,41 @@ class InnerTubeClient(
 
     private fun verifyStreamReachable(stream: AudioStreamInfo): Boolean {
         return runCatching {
-            val req = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(stream.url)
                 .header("User-Agent", stream.userAgent)
-                .header("Range", "bytes=0-4095")
+                .header("Range", "bytes=0-1023")
                 .get()
-                .build()
-            httpClient.newCall(req).execute().use { resp ->
-                val contentType = resp.header("Content-Type").orEmpty()
-                val isValidStatus = resp.code == 200 || resp.code == 206
-                val isNotHtml = !contentType.contains("text/html", ignoreCase = true)
-                val bytes = resp.body?.bytes()
-                isValidStatus && isNotHtml && (bytes != null && bytes.size > 128)
+
+            if (stream.url.contains("c=WEB", ignoreCase = true) ||
+                stream.url.contains("c=TVHTML5", ignoreCase = true)
+            ) {
+                reqBuilder
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+            }
+
+            httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+                if (resp.code != 200 && resp.code != 206) return@runCatching false
+                val firstByte = resp.body?.byteStream()?.read() ?: -1
+                firstByte != -1
             }
         }.getOrDefault(false)
     }
 
-    private fun fetchAndroidVrStream(videoId: String, visitorData: String?): AudioStreamInfo? {
+    private fun fetchAndroidVrStream(videoId: String): AudioStreamInfo? {
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
                     put("clientName", "ANDROID_VR")
                     put("clientVersion", "1.71.26")
                     put("deviceMake", "Oculus")
-                    put("deviceModel", "Quest 3")
+                    put("deviceModel", "Quest 3S")
                     put("osName", "Android")
                     put("osVersion", "14")
                     put("androidSdkVersion", 34)
                     put("hl", "th")
                     put("gl", "TH")
-                    if (!visitorData.isNullOrBlank()) {
-                        put("visitorData", visitorData)
-                    }
                 }
             }
             put("videoId", videoId)
@@ -228,27 +191,26 @@ class InnerTubeClient(
         }.toString()
 
         return executePlayerRequest(
-            endpointUrl = YT_PLAYER_URL,
             payload = payload,
             userAgent = DEFAULT_VR_USER_AGENT,
             clientIdHeader = "28",
-            clientVersion = "1.71.26",
-            visitorData = visitorData
+            clientVersion = "1.71.26"
         )
     }
 
-    private fun fetchAndroidMobileStream(videoId: String, visitorData: String?): AudioStreamInfo? {
+    private fun fetchAndroidCreatorStream(videoId: String): AudioStreamInfo? {
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
-                    put("clientName", "ANDROID")
-                    put("clientVersion", "20.14.2")
+                    put("clientName", "ANDROID_CREATOR")
+                    put("clientVersion", "24.47.100")
+                    put("deviceMake", "Google")
+                    put("deviceModel", "Pixel 8")
+                    put("osName", "Android")
+                    put("osVersion", "14")
                     put("androidSdkVersion", 34)
                     put("hl", "th")
                     put("gl", "TH")
-                    if (!visitorData.isNullOrBlank()) {
-                        put("visitorData", visitorData)
-                    }
                 }
             }
             put("videoId", videoId)
@@ -257,30 +219,24 @@ class InnerTubeClient(
         }.toString()
 
         return executePlayerRequest(
-            endpointUrl = YTM_PLAYER_URL,
             payload = payload,
-            userAgent = DEFAULT_ANDROID_USER_AGENT,
-            clientIdHeader = "3",
-            clientVersion = "20.14.2",
-            visitorData = visitorData
+            userAgent = CREATOR_USER_AGENT,
+            clientIdHeader = "14",
+            clientVersion = "24.47.100"
         )
     }
 
-    private fun fetchIosStream(videoId: String, visitorData: String?): AudioStreamInfo? {
+    private fun fetchAndroidTestsuiteStream(videoId: String): AudioStreamInfo? {
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
-                    put("clientName", "IOS")
-                    put("clientVersion", "20.14.2")
-                    put("deviceMake", "Apple")
-                    put("deviceModel", "iPhone16,2")
-                    put("osName", "iPhone")
-                    put("osVersion", "18.4.0.22E240")
+                    put("clientName", "ANDROID_TESTSUITE")
+                    put("clientVersion", "1.9")
+                    put("osName", "Android")
+                    put("osVersion", "11")
+                    put("androidSdkVersion", 30)
                     put("hl", "th")
                     put("gl", "TH")
-                    if (!visitorData.isNullOrBlank()) {
-                        put("visitorData", visitorData)
-                    }
                 }
             }
             put("videoId", videoId)
@@ -289,26 +245,45 @@ class InnerTubeClient(
         }.toString()
 
         return executePlayerRequest(
-            endpointUrl = YT_PLAYER_URL,
             payload = payload,
-            userAgent = DEFAULT_IOS_USER_AGENT,
-            clientIdHeader = "5",
-            clientVersion = "20.14.2",
-            visitorData = visitorData
+            userAgent = TESTSUITE_USER_AGENT,
+            clientIdHeader = "30",
+            clientVersion = "1.9"
         )
     }
 
-    private fun fetchWebEmbeddedStream(videoId: String, visitorData: String?): AudioStreamInfo? {
+    private fun fetchTvHtml5Stream(videoId: String): AudioStreamInfo? {
+        val payload = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    put("clientName", "TVHTML5")
+                    put("clientVersion", "7.20250312.16.00")
+                    put("hl", "th")
+                    put("gl", "TH")
+                }
+            }
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+        }.toString()
+
+        return executePlayerRequest(
+            payload = payload,
+            userAgent = TV_USER_AGENT,
+            clientIdHeader = "7",
+            clientVersion = "7.20250312.16.00",
+            origin = "https://www.youtube.com"
+        )
+    }
+
+    private fun fetchWebEmbeddedStream(videoId: String): AudioStreamInfo? {
         val payload = buildJsonObject {
             putJsonObject("context") {
                 putJsonObject("client") {
                     put("clientName", "WEB_EMBEDDED_PLAYER")
-                    put("clientVersion", "1.20260301.01.00")
+                    put("clientVersion", "1.20250310.01.00")
                     put("hl", "th")
                     put("gl", "TH")
-                    if (!visitorData.isNullOrBlank()) {
-                        put("visitorData", visitorData)
-                    }
                 }
                 putJsonObject("thirdParty") {
                     put("embedUrl", "https://www.youtube.com/")
@@ -320,67 +295,36 @@ class InnerTubeClient(
         }.toString()
 
         return executePlayerRequest(
-            endpointUrl = YT_PLAYER_URL,
             payload = payload,
-            userAgent = DEFAULT_WEB_USER_AGENT,
+            userAgent = WEB_USER_AGENT,
             clientIdHeader = "56",
-            clientVersion = "1.20260301.01.00",
-            visitorData = visitorData,
+            clientVersion = "1.20250310.01.00",
             origin = "https://www.youtube.com"
         )
     }
 
-    private fun fetchTvEmbeddedStream(videoId: String, visitorData: String?): AudioStreamInfo? {
-        val payload = buildJsonObject {
-            putJsonObject("context") {
-                putJsonObject("client") {
-                    put("clientName", "TVHTML5_SIMPLY_EMBEDDED_PLAYER")
-                    put("clientVersion", "2.0")
-                    put("hl", "th")
-                    put("gl", "TH")
-                    if (!visitorData.isNullOrBlank()) {
-                        put("visitorData", visitorData)
-                    }
-                }
-                putJsonObject("thirdParty") {
-                    put("embedUrl", "https://www.youtube.com/")
-                }
-            }
-            put("videoId", videoId)
-            put("contentCheckOk", true)
-            put("racyCheckOk", true)
-        }.toString()
-
-        return executePlayerRequest(
-            endpointUrl = YT_PLAYER_URL,
-            payload = payload,
-            userAgent = DEFAULT_TV_USER_AGENT,
-            clientIdHeader = "85",
-            clientVersion = "2.0",
-            visitorData = visitorData,
-            origin = "https://www.youtube.com"
-        )
+    private fun appendCpnIfMissing(rawUrl: String): String {
+        if (!rawUrl.contains("googlevideo.com") || rawUrl.contains("cpn=")) return rawUrl
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        val cpn = (1..16).map { chars.random() }.joinToString("")
+        val sep = if (rawUrl.contains("?")) "&" else "?"
+        return "$rawUrl${sep}cpn=$cpn"
     }
 
     private fun executePlayerRequest(
-        endpointUrl: String,
         payload: String,
         userAgent: String,
         clientIdHeader: String,
         clientVersion: String,
-        visitorData: String?,
         origin: String? = null
     ): AudioStreamInfo? {
         val reqBuilder = Request.Builder()
-            .url(endpointUrl)
+            .url(YT_PLAYER_URL)
             .header("User-Agent", userAgent)
             .header("X-YouTube-Client-Name", clientIdHeader)
             .header("X-YouTube-Client-Version", clientVersion)
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
 
-        if (!visitorData.isNullOrBlank()) {
-            reqBuilder.header("X-Goog-Visitor-Id", visitorData)
-        }
         if (!origin.isNullOrBlank()) {
             reqBuilder.header("Origin", origin)
             reqBuilder.header("Referer", "$origin/")
@@ -391,144 +335,77 @@ class InnerTubeClient(
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
                 val root = json.parseToJsonElement(body).jsonObject
+
+                val status = root["playabilityStatus"]?.jsonObject
+                    ?.get("status")?.jsonPrimitive?.contentOrNull
+                if (status != null && status != "OK") return null
+
                 val streamingData = root["streamingData"]?.jsonObject ?: return null
                 val expiresInSec = streamingData["expiresInSeconds"]?.jsonPrimitive?.longOrNull ?: 3600L
-                val adaptiveFormats = streamingData["adaptiveFormats"]?.jsonArray ?: return null
 
-                var bestMp4Audio: AudioStreamInfo? = null
-                var bestAnyAudio: AudioStreamInfo? = null
+                val adaptiveFormats = streamingData["adaptiveFormats"]?.jsonArray
+                if (adaptiveFormats != null) {
+                    var bestMp4Audio: AudioStreamInfo? = null
+                    var bestAnyAudio: AudioStreamInfo? = null
 
-                for (item in adaptiveFormats) {
+                    for (item in adaptiveFormats) {
+                        val obj = item.jsonObject
+                        val mimeType = obj["mimeType"]?.jsonPrimitive?.contentOrNull ?: continue
+                        if (!mimeType.startsWith("audio/")) continue
+                        val rawUrl = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
+                        if (rawUrl.isBlank()) continue
+                        val url = appendCpnIfMissing(rawUrl)
+                        val bitrate = obj["bitrate"]?.jsonPrimitive?.intOrNull ?: 0
+                        val contentLength = obj["contentLength"]?.jsonPrimitive?.longOrNull ?: 0L
+
+                        val candidate = AudioStreamInfo(
+                            url = url,
+                            mimeType = mimeType,
+                            bitrate = bitrate,
+                            contentLength = contentLength,
+                            userAgent = userAgent,
+                            expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
+                        )
+
+                        if (mimeType.startsWith("audio/mp4")) {
+                            if (bestMp4Audio == null || bitrate > bestMp4Audio.bitrate) {
+                                bestMp4Audio = candidate
+                            }
+                        }
+                        if (bestAnyAudio == null || bitrate > bestAnyAudio.bitrate) {
+                            bestAnyAudio = candidate
+                        }
+                    }
+                    if (bestMp4Audio != null || bestAnyAudio != null) {
+                        return bestMp4Audio ?: bestAnyAudio
+                    }
+                }
+
+                // Fallback to muxed formats if adaptiveFormats had no direct url
+                val formats = streamingData["formats"]?.jsonArray ?: return null
+                var bestMuxed: AudioStreamInfo? = null
+                for (item in formats) {
                     val obj = item.jsonObject
                     val mimeType = obj["mimeType"]?.jsonPrimitive?.contentOrNull ?: continue
-                    if (!mimeType.startsWith("audio/")) continue
                     val rawUrl = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
                     if (rawUrl.isBlank()) continue
-                    val url = if (rawUrl.contains("googlevideo.com") && !rawUrl.contains("cpn=")) {
-                        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-                        val cpn = (1..16).map { chars.random() }.joinToString("")
-                        val sep = if (rawUrl.contains("?")) "&" else "?"
-                        "$rawUrl${sep}cpn=$cpn"
-                    } else rawUrl
-                    if (url.isBlank()) continue
+                    val url = appendCpnIfMissing(rawUrl)
                     val bitrate = obj["bitrate"]?.jsonPrimitive?.intOrNull ?: 0
                     val contentLength = obj["contentLength"]?.jsonPrimitive?.longOrNull ?: 0L
-
-                    val candidate = AudioStreamInfo(
-                        url = url,
-                        mimeType = mimeType,
-                        bitrate = bitrate,
-                        contentLength = contentLength,
-                        userAgent = userAgent,
-                        expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
-                    )
-
-                    if (mimeType.startsWith("audio/mp4")) {
-                        if (bestMp4Audio == null || bitrate > bestMp4Audio.bitrate) {
-                            bestMp4Audio = candidate
-                        }
-                    }
-                    if (bestAnyAudio == null || bitrate > bestAnyAudio.bitrate) {
-                        bestAnyAudio = candidate
+                    if (bestMuxed == null || bitrate > bestMuxed.bitrate) {
+                        bestMuxed = AudioStreamInfo(
+                            url = url,
+                            mimeType = mimeType,
+                            bitrate = bitrate,
+                            contentLength = contentLength,
+                            userAgent = userAgent,
+                            expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
+                        )
                     }
                 }
-                bestMp4Audio ?: bestAnyAudio
+                bestMuxed
             }
         }.getOrNull()
-    }
-
-    private fun fetchPipedFallbackStream(videoId: String): AudioStreamInfo? {
-        val instances = listOf(
-            "https://pipedapi.kavin.rocks",
-            "https://pipedapi.adminforge.de",
-            "https://api.piped.private.coffee",
-            "https://pipedapi.drgns.space"
-        )
-        for (base in instances) {
-            val found = runCatching {
-                val req = Request.Builder()
-                    .url("$base/streams/$videoId")
-                    .header("User-Agent", DEFAULT_WEB_USER_AGENT)
-                    .get()
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@runCatching null
-                    val body = resp.body?.string() ?: return@runCatching null
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val audioStreams = root["audioStreams"]?.jsonArray ?: return@runCatching null
-                    var best: AudioStreamInfo? = null
-                    for (el in audioStreams) {
-                        val obj = el.jsonObject
-                        val rawUrl = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
-                    if (rawUrl.isBlank()) continue
-                    val url = if (rawUrl.contains("googlevideo.com") && !rawUrl.contains("cpn=")) {
-                        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-                        val cpn = (1..16).map { chars.random() }.joinToString("")
-                        val sep = if (rawUrl.contains("?")) "&" else "?"
-                        "$rawUrl${sep}cpn=$cpn"
-                    } else rawUrl
-                        val mime = obj["mimeType"]?.jsonPrimitive?.contentOrNull ?: "audio/mp4"
-                        val bitrate = obj["bitrate"]?.jsonPrimitive?.intOrNull ?: 0
-                        if (best == null || bitrate > best.bitrate) {
-                            best = AudioStreamInfo(
-                                url = url,
-                                mimeType = mime,
-                                bitrate = bitrate,
-                                userAgent = DEFAULT_WEB_USER_AGENT,
-                                expiresAtMs = System.currentTimeMillis() + 3600_000L
-                            )
-                        }
-                    }
-                    best
-                }
-            }.getOrNull()
-            if (found != null) return found
-        }
-        return null
-    }
-
-    private fun fetchInvidiousFallbackStream(videoId: String): AudioStreamInfo? {
-        val instances = listOf(
-            "https://inv.nadeko.net",
-            "https://invidious.nerdvpn.de",
-            "https://yewtu.be"
-        )
-        for (base in instances) {
-            val found = runCatching {
-                val req = Request.Builder()
-                    .url("$base/api/v1/videos/$videoId?local=true")
-                    .header("User-Agent", DEFAULT_WEB_USER_AGENT)
-                    .get()
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@runCatching null
-                    val body = resp.body?.string() ?: return@runCatching null
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val formats = root["adaptiveFormats"]?.jsonArray ?: return@runCatching null
-                    var best: AudioStreamInfo? = null
-                    for (el in formats) {
-                        val obj = el.jsonObject
-                        val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: continue
-                        if (!type.startsWith("audio/")) continue
-                        val rawUrl = obj["url"]?.jsonPrimitive?.contentOrNull ?: continue
-                        val fullUrl = if (rawUrl.startsWith("/")) "$base$rawUrl" else rawUrl
-                        val bitrate = obj["bitrate"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
-                        if (best == null || bitrate > best.bitrate) {
-                            best = AudioStreamInfo(
-                                url = fullUrl,
-                                mimeType = type,
-                                bitrate = bitrate,
-                                userAgent = DEFAULT_WEB_USER_AGENT,
-                                expiresAtMs = System.currentTimeMillis() + 3600_000L
-                            )
-                        }
-                    }
-                    best
-                }
-            }.getOrNull()
-            if (found != null) return found
-        }
-        return null
     }
 
     private fun extractTracksFromSearch(root: JsonElement): List<TrackItem> {
