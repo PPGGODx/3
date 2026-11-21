@@ -1,6 +1,7 @@
 package com.hybridmusic.player.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hybridmusic.player.innertube.TrackItem
@@ -70,7 +72,7 @@ fun PlayZongXRoot(viewModel: MainViewModel) {
     val hasMiniPlayer = playbackState.currentTrack != null
     val bottomClearance = if (hasMiniPlayer) 168.dp else 104.dp
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // พื้นหลัง RGB Aurora เคลื่อนไหวตลอดเวลา
         LiquidRgbAuroraBackground()
 

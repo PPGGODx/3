@@ -198,7 +198,7 @@ fun LiquidFullPlayerSheet(
             (state.positionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
         } else 0f
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             LiquidRgbAuroraBackground()
 
             Column(

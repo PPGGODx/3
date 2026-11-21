@@ -43,17 +43,16 @@ val LocalRgbPalette = staticCompositionLocalOf {
         primary = Color(0xFF38BDF8),
         secondary = Color(0xFFA855F7),
         tertiary = Color(0xFF10B981),
-        specularRim = Color.White.copy(alpha = 0.65f),
+        specularRim = Color.White.copy(alpha = 0.68f),
         innerGlow = Color(0xFF38BDF8).copy(alpha = 0.24f),
-        glassSurface = Color(0xFF101322).copy(alpha = 0.48f),
-        glassSurfaceElevated = Color(0xFF171B30).copy(alpha = 0.62f),
-        backdropDeep = Color(0xFF06070D),
+        glassSurface = Color(0xFF0A0C14).copy(alpha = 0.72f),
+        glassSurfaceElevated = Color(0xFF121524).copy(alpha = 0.84f),
+        backdropDeep = Color(0xFF000000),
         textPrimary = Color(0xFFF8FAFC),
         textSecondary = Color(0xFFCBD5E1)
     )
 }
 
-// Spring Tokens ตามสเปก Liquid Glass (Snappy & Fluid)
 object LiquidMotionTokens {
     val SnappySpring = spring<Float>(
         dampingRatio = 0.76f,
@@ -114,7 +113,6 @@ private val LiquidTypography = Typography(
 fun LiquidGlassRgbTheme(
     content: @Composable () -> Unit
 ) {
-    // ไล่เฉดสี RGB รอบวงล้อ 360 องศาอย่างต่อเนื่องทุกวินาที (40 องศา/วินาที = 9 วินาทีครบวง)
     val infiniteTransition = rememberInfiniteTransition(label = "rgb_spectrum_cycle")
     val hue by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -126,10 +124,10 @@ fun LiquidGlassRgbTheme(
         label = "rgb_hue"
     )
 
-    val primary = Color.hsv(hue, 0.80f, 1.0f)
-    val secondary = Color.hsv((hue + 55f) % 360f, 0.78f, 0.98f)
-    val tertiary = Color.hsv((hue + 145f) % 360f, 0.76f, 0.95f)
-    val specular = Color.hsv(hue, 0.30f, 1.0f).copy(alpha = 0.72f)
+    val primary = Color.hsv(hue, 0.82f, 1.0f)
+    val secondary = Color.hsv((hue + 55f) % 360f, 0.80f, 0.98f)
+    val tertiary = Color.hsv((hue + 145f) % 360f, 0.78f, 0.95f)
+    val specular = Color.hsv(hue, 0.35f, 1.0f).copy(alpha = 0.75f)
 
     val palette = RgbGlassPalette(
         hue = hue,
@@ -138,9 +136,9 @@ fun LiquidGlassRgbTheme(
         tertiary = tertiary,
         specularRim = specular,
         innerGlow = primary.copy(alpha = 0.24f),
-        glassSurface = Color(0xFF0E1220).copy(alpha = 0.50f),
-        glassSurfaceElevated = Color(0xFF151A2E).copy(alpha = 0.66f),
-        backdropDeep = Color(0xFF05070E),
+        glassSurface = Color(0xFF0A0C14).copy(alpha = 0.72f),
+        glassSurfaceElevated = Color(0xFF121524).copy(alpha = 0.84f),
+        backdropDeep = Color(0xFF000000),
         textPrimary = Color(0xFFF8FAFC),
         textSecondary = Color(0xFFCBD5E1)
     )
@@ -149,9 +147,9 @@ fun LiquidGlassRgbTheme(
         primary = primary,
         secondary = secondary,
         tertiary = tertiary,
-        background = palette.backdropDeep,
+        background = Color.Black,
         surface = palette.glassSurface,
-        onPrimary = Color(0xFF04060C),
+        onPrimary = Color(0xFF000000),
         onSecondary = Color.White,
         onBackground = palette.textPrimary,
         onSurface = palette.textPrimary

@@ -1,6 +1,7 @@
 package com.hybridmusic.player
 
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -14,10 +15,16 @@ import com.hybridmusic.player.ui.viewmodel.MainViewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+            statusBarStyle = SystemBarStyle.dark(Color.BLACK),
+            navigationBarStyle = SystemBarStyle.dark(Color.BLACK)
         )
         super.onCreate(savedInstanceState)
+
+        // บังคับพื้นหลังหน้าต่างเป็นสีดำสนิท และป้องกันระบบมือถือกลับสีพื้นหลังเป็นสีขาว
+        window.decorView.setBackgroundColor(Color.BLACK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.decorView.isForceDarkAllowed = false
+        }
 
         val app = application as HybridMusicApp
         val factory = MainViewModel.Factory(
