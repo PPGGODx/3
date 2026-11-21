@@ -17,6 +17,8 @@ import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+typealias DownloadProgressMap = Map<String, DownloadTaskProgress>
+
 class OfflineAudioRepository private constructor(context: Context) {
 
     private val appContext = context.applicationContext
@@ -28,8 +30,8 @@ class OfflineAudioRepository private constructor(context: Context) {
     private val _offlineTracks = MutableStateFlow<List<OfflineTrackEntity>>(emptyList())
     val offlineTracks: StateFlow<List<OfflineTrackEntity>> = _offlineTracks.asStateFlow()
 
-    private val _activeDownloads = MutableStateFlow>(emptyMap())
-    val activeDownloads: StateFlow> = _activeDownloads.asStateFlow()
+    private val _activeDownloads = MutableStateFlow<DownloadProgressMap>(emptyMap())
+    val activeDownloads: StateFlow<DownloadProgressMap> = _activeDownloads.asStateFlow()
 
     init {
         loadIndexFromDisk()
