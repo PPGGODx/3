@@ -558,7 +558,7 @@ fun LiquidTrackRow(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
-                    containerColor = Color(0xFF14192B)
+                    modifier = Modifier.background(Color(0xFF14192B))
                 ) {
                     DropdownMenuItem(
                         text = { Text("เปิดวิทยุเพลงแนวนี้", color = Color.White) },
