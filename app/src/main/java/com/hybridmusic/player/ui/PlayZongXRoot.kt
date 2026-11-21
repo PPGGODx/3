@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,116 +73,129 @@ fun PlayZongXRoot(viewModel: MainViewModel) {
     val hasMiniPlayer = playbackState.currentTrack != null
     val bottomClearance = if (hasMiniPlayer) 168.dp else 104.dp
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // พื้นหลัง RGB Aurora เคลื่อนไหวตลอดเวลา
-        LiquidRgbAuroraBackground()
-
-        // WebView Engine สำรองแบบ 1dp (ทำงานเบื้องหลังโดยไม่รบกวน UI)
-        viewModel.playerController.getEmbedWebView()?.let { webView ->
-            AndroidView(
-                factory = { webView },
-                modifier = Modifier.size(1.dp)
-            )
-        }
-
-        // เนื้อหาหลักของแต่ละแท็บหรือหน้าเพลย์ลิสต์
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Black
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .background(Color.Black)
         ) {
-            val currentCol = activeCollection
-            if (currentCol != null) {
-                LiquidCollectionOverlay(
-                    collection = currentCol,
-                    viewModel = viewModel,
-                    bottomInsetPadding = bottomClearance,
-                    onRequestAddToPlaylist = { trackForPlaylistDialog = it }
-                )
-            } else {
-                when (selectedTab) {
-                    0 -> LiquidHomeScreen(
-                        viewModel = viewModel,
-                        bottomInsetPadding = bottomClearance,
-                        onOpenSleepTimer = { showSleepDialog = true },
-                        onRequestAddToPlaylist = { trackForPlaylistDialog = it }
-                    )
-                    1 -> LiquidSearchScreen(
-                        viewModel = viewModel,
-                        bottomInsetPadding = bottomClearance,
-                        onRequestAddToPlaylist = { trackForPlaylistDialog = it }
-                    )
-                    2 -> LiquidLibraryScreen(
-                        viewModel = viewModel,
-                        bottomInsetPadding = bottomClearance
-                    )
-                }
-            }
-        }
+            // พื้นหลังสีดำสนิทพร้อมแสง RGB Aurora
+            LiquidRgbAuroraBackground()
 
-        // Floating Mini Player + Floating Capsule Nav Bar ด้านล่าง
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            if (hasMiniPlayer) {
-                LiquidMiniPlayerBar(
-                    viewModel = viewModel,
-                    onExpand = { viewModel.openFullPlayer(true) }
+            // WebView Engine สำรองแบบโปร่งใส 1dp (ไม่ให้เกิดพื้นหลังสีขาว)
+            viewModel.playerController.getEmbedWebView()?.let { webView ->
+                AndroidView(
+                    factory = {
+                        webView.apply {
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        }
+                    },
+                    modifier = Modifier.size(1.dp)
                 )
             }
-            LiquidFloatingNavBar(
-                items = listOf(
-                    "หน้าหลัก" to Icons.Rounded.Home,
-                    "ค้นหา" to Icons.Rounded.Search,
-                    "คลังเพลง" to Icons.Rounded.LibraryMusic
-                ),
-                selectedIndex = selectedTab,
-                onSelect = { viewModel.selectTab(it) }
-            )
-        }
 
-        // Toast แจ้งเตือนกระจกเลื่อนจากด้านบน
-        LiquidToastBanner(
-            message = statusBanner,
-            onDismiss = { viewModel.clearStatusBanner() },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-        )
-
-        // หน้าจอ Full Player แบบ Liquid Glass
-        LiquidFullPlayerSheet(
-            viewModel = viewModel,
-            onRequestAddToPlaylist = { trackForPlaylistDialog = it }
-        )
-
-        // Dialog เพิ่มลงเพลย์ลิสต์ & ตั้งเวลาปิดเพลง
-        trackForPlaylistDialog?.let { targetTrack ->
-            AddToPlaylistGlassDialog(
-                track = targetTrack,
-                userPlaylists = userPlaylists,
-                onDismiss = { trackForPlaylistDialog = null },
-                onSelectPlaylist = { plId ->
-                    viewModel.addTrackToPlaylist(plId, targetTrack)
-                    trackForPlaylistDialog = null
-                },
-                onCreateAndAdd = { newName ->
-                    viewModel.createPlaylist(newName, targetTrack)
-                    trackForPlaylistDialog = null
+            // เนื้อหาหลักของแต่ละแท็บหรือหน้าเพลย์ลิสต์
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                val currentCol = activeCollection
+                if (currentCol != null) {
+                    LiquidCollectionOverlay(
+                        collection = currentCol,
+                        viewModel = viewModel,
+                        bottomInsetPadding = bottomClearance,
+                        onRequestAddToPlaylist = { trackForPlaylistDialog = it }
+                    )
+                } else {
+                    when (selectedTab) {
+                        0 -> LiquidHomeScreen(
+                            viewModel = viewModel,
+                            bottomInsetPadding = bottomClearance,
+                            onOpenSleepTimer = { showSleepDialog = true },
+                            onRequestAddToPlaylist = { trackForPlaylistDialog = it }
+                        )
+                        1 -> LiquidSearchScreen(
+                            viewModel = viewModel,
+                            bottomInsetPadding = bottomClearance,
+                            onRequestAddToPlaylist = { trackForPlaylistDialog = it }
+                        )
+                        2 -> LiquidLibraryScreen(
+                            viewModel = viewModel,
+                            bottomInsetPadding = bottomClearance
+                        )
+                    }
                 }
-            )
-        }
+            }
 
-        if (showSleepDialog) {
-            SleepTimerGlassDialog(
-                remainingSec = sleepSec,
-                onDismiss = { showSleepDialog = false },
-                onSelectMinutes = { viewModel.setSleepTimerMinutes(it) }
+            // Floating Mini Player + Floating Capsule Nav Bar ด้านล่าง
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (hasMiniPlayer) {
+                    LiquidMiniPlayerBar(
+                        viewModel = viewModel,
+                        onExpand = { viewModel.openFullPlayer(true) }
+                    )
+                }
+                LiquidFloatingNavBar(
+                    items = listOf(
+                        "หน้าหลัก" to Icons.Rounded.Home,
+                        "ค้นหา" to Icons.Rounded.Search,
+                        "คลังเพลง" to Icons.Rounded.LibraryMusic
+                    ),
+                    selectedIndex = selectedTab,
+                    onSelect = { viewModel.selectTab(it) }
+                )
+            }
+
+            // Toast แจ้งเตือนกระจกเลื่อนจากด้านบน
+            LiquidToastBanner(
+                message = statusBanner,
+                onDismiss = { viewModel.clearStatusBanner() },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
             )
+
+            // หน้าจอ Full Player แบบ Liquid Glass
+            LiquidFullPlayerSheet(
+                viewModel = viewModel,
+                onRequestAddToPlaylist = { trackForPlaylistDialog = it }
+            )
+
+            // Dialog เพิ่มลงเพลย์ลิสต์ & ตั้งเวลาปิดเพลง
+            trackForPlaylistDialog?.let { targetTrack ->
+                AddToPlaylistGlassDialog(
+                    track = targetTrack,
+                    userPlaylists = userPlaylists,
+                    onDismiss = { trackForPlaylistDialog = null },
+                    onSelectPlaylist = { plId ->
+                        viewModel.addTrackToPlaylist(plId, targetTrack)
+                        trackForPlaylistDialog = null
+                    },
+                    onCreateAndAdd = { newName ->
+                        viewModel.createPlaylist(newName, targetTrack)
+                        trackForPlaylistDialog = null
+                    }
+                )
+            }
+
+            if (showSleepDialog) {
+                SleepTimerGlassDialog(
+                    remainingSec = sleepSec,
+                    onDismiss = { showSleepDialog = false },
+                    onSelectMinutes = { viewModel.setSleepTimerMinutes(it) }
+                )
+            }
         }
     }
 }

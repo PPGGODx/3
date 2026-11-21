@@ -118,7 +118,7 @@ fun LiquidRgbAuroraBackground(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    palette.primary.copy(alpha = 0.22f),
+                    palette.primary.copy(alpha = 0.34f),
                     palette.primary.copy(alpha = 0.08f),
                     Color.Transparent
                 ),
@@ -137,7 +137,7 @@ fun LiquidRgbAuroraBackground(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    palette.secondary.copy(alpha = 0.18f),
+                    palette.secondary.copy(alpha = 0.30f),
                     palette.secondary.copy(alpha = 0.06f),
                     Color.Transparent
                 ),
@@ -156,7 +156,7 @@ fun LiquidRgbAuroraBackground(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    palette.tertiary.copy(alpha = 0.16f),
+                    palette.tertiary.copy(alpha = 0.26f),
                     palette.tertiary.copy(alpha = 0.05f),
                     Color.Transparent
                 ),
@@ -460,7 +460,7 @@ fun LiquidFloatingNavBar(
                 .background(
                     Brush.horizontalGradient(
                         listOf(
-                            palette.primary.copy(alpha = 0.22f),
+                            palette.primary.copy(alpha = 0.34f),
                             palette.secondary.copy(alpha = 0.28f)
                         )
                     )
@@ -562,7 +562,7 @@ fun LiquidSegmentedControl(
                     Brush.horizontalGradient(
                         listOf(
                             palette.primary.copy(alpha = 0.38f),
-                            palette.secondary.copy(alpha = 0.18f)
+                            palette.secondary.copy(alpha = 0.30f)
                         )
                     )
                 )

@@ -1,6 +1,7 @@
 package com.hybridmusic.player
 
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -20,7 +21,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
 
-        // บังคับพื้นหลังหน้าต่างเป็นสีดำสนิท และป้องกันระบบมือถือกลับสีพื้นหลังเป็นสีขาว
+        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         window.decorView.setBackgroundColor(Color.BLACK)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.decorView.isForceDarkAllowed = false
