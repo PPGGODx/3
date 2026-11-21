@@ -1,5 +1,9 @@
 package com.hybridmusic.player.ui.viewmodel
 
+import android.content.Context
+import com.hybridmusic.player.offline.OfflineAudioRepository
+import com.hybridmusic.player.offline.OfflineDownloadManager
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -386,7 +390,30 @@ class MainViewModel(
         }
     }
 
-    class Factory(
+    
+    fun downloadTrackOffline(context: Context, track: TrackItem) {
+        OfflineDownloadManager.getInstance(context, innerTubeClient).enqueueDownload(track) { msg ->
+            _statusBanner.value = msg
+        }
+    }
+
+    fun downloadPlaylistOffline(context: Context, tracks: List<TrackItem>) {
+        OfflineDownloadManager.getInstance(context, innerTubeClient).enqueueBatch(tracks) { msg ->
+            _statusBanner.value = msg
+        }
+    }
+
+    fun deleteOfflineTrack(context: Context, track: TrackItem) {
+        OfflineAudioRepository.getInstance(context).deleteOfflineTrack(track.videoId)
+        _statusBanner.value = "ลบไฟล์ออฟไลน์แล้ว: ${track.title}"
+    }
+
+    fun clearAllOfflineTracks(context: Context) {
+        OfflineAudioRepository.getInstance(context).clearAllOffline()
+        _statusBanner.value = "ล้างไฟล์เพลงออฟไลน์ทั้งหมดแล้ว"
+    }
+
+class Factory(
         private val innerTubeClient: InnerTubeClient,
         private val libraryRepository: LibraryRepository,
         private val playerController: PlayerController

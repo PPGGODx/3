@@ -3,9 +3,7 @@ package com.hybridmusic.player.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +31,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bookmark
@@ -41,10 +38,13 @@ import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.QueueMusic
@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +89,10 @@ import coil.compose.AsyncImage
 import com.hybridmusic.player.innertube.TrackItem
 import com.hybridmusic.player.innertube.UserPlaylist
 import com.hybridmusic.player.innertube.YtPlaylistCard
+import com.hybridmusic.player.offline.DownloadTaskProgress
+import com.hybridmusic.player.offline.OfflineAudioRepository
+import com.hybridmusic.player.offline.OfflineDownloadStatus
+import com.hybridmusic.player.offline.effectiveArtworkModel
 import com.hybridmusic.player.ui.components.LiquidGlassIconButton
 import com.hybridmusic.player.ui.components.LiquidGlassPillButton
 import com.hybridmusic.player.ui.components.LiquidGlassSurface
@@ -97,6 +102,73 @@ import com.hybridmusic.player.ui.theme.LiquidMotionTokens
 import com.hybridmusic.player.ui.theme.LocalRgbPalette
 import com.hybridmusic.player.ui.viewmodel.ActiveCollectionView
 import com.hybridmusic.player.ui.viewmodel.MainViewModel
+import java.io.File
+
+@Composable
+fun OfflineDownloadActionBadge(
+    isDownloaded: Boolean,
+    downloadProgress: DownloadTaskProgress?,
+    onDownloadClick: () -> Unit,
+    onDeleteOfflineClick: () -> Unit
+) {
+    val palette = LocalRgbPalette.current
+
+    when {
+        isDownloaded -> {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable { onDeleteOfflineClick() }
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DownloadDone,
+                    contentDescription = "ดาวน์โหลดแล้ว",
+                    tint = palette.primary,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+        }
+        downloadProgress != null && downloadProgress.status != OfflineDownloadStatus.FAILED -> {
+            Box(
+                modifier = Modifier.size(36.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    progress = downloadProgress.progress.coerceIn(0.05f, 1f),
+                    color = palette.primary,
+                    trackColor = Color.White.copy(alpha = 0.16f),
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "${(downloadProgress.progress * 100).toInt()}",
+                    style = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
+        }
+        else -> {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable { onDownloadClick() }
+                    .padding(6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Download,
+                    contentDescription = "ดาวน์โหลดออฟไลน์",
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun LiquidHomeScreen(
@@ -105,23 +177,24 @@ fun LiquidHomeScreen(
     onOpenSleepTimer: () -> Unit,
     onRequestAddToPlaylist: (TrackItem) -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     val homeFeed by viewModel.homeFeed.collectAsState()
     val selectedMoodIndex by viewModel.selectedMoodIndex.collectAsState()
     val isLoadingHome by viewModel.isLoadingHome.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
-    val likedTracks by viewModel.likedTracks.collectAsState()
     val autoplayRadio by viewModel.autoplayRadioEnabled.collectAsState()
     val sleepSec by viewModel.sleepTimerRemainingSec.collectAsState()
 
-    val likedIds = remember(likedTracks) { likedTracks.map { it.videoId }.toSet() }
+    val offlineRepo = remember { OfflineAudioRepository.getInstance(context) }
+    val offlineTracks by offlineRepo.offlineTracks.collectAsState()
+    val offlineIds = remember(offlineTracks) { offlineTracks.map { it.videoId }.toSet() }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 12.dp, bottom = bottomInsetPadding),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Top Header แบบ Liquid Glass
         item {
             Row(
                 modifier = Modifier
@@ -148,7 +221,6 @@ fun LiquidHomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // ปุ่มเปิด/ปิดวิทยุต่อเนื่อง
                     LiquidGlassSurface(
                         shape = CircleShape,
                         elevated = autoplayRadio,
@@ -185,7 +257,6 @@ fun LiquidHomeScreen(
             }
         }
 
-        // Mood Chips ทรงแคปซูลกระจก
         item {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp),
@@ -239,7 +310,6 @@ fun LiquidHomeScreen(
                 }
             }
         } else {
-            // Quick Picks 2 คอลัมน์
             if (homeFeed.quickPicks.isNotEmpty()) {
                 item {
                     Column(
@@ -259,6 +329,7 @@ fun LiquidHomeScreen(
                             ) {
                                 rowItems.forEach { track ->
                                     val isCurrent = playbackState.currentTrack?.videoId == track.videoId
+                                    val isOffline = offlineIds.contains(track.videoId)
                                     LiquidGlassSurface(
                                         shape = RoundedCornerShape(18.dp),
                                         elevated = isCurrent,
@@ -271,7 +342,7 @@ fun LiquidHomeScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             AsyncImage(
-                                                model = track.thumbnailUrl,
+                                                model = track.effectiveArtworkModel(context),
                                                 contentDescription = track.title,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier
@@ -288,13 +359,24 @@ fun LiquidHomeScreen(
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
-                                                Text(
-                                                    text = track.artist,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = palette.textSecondary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (isOffline) {
+                                                        Icon(
+                                                            imageVector = Icons.Rounded.OfflinePin,
+                                                            contentDescription = null,
+                                                            tint = palette.primary,
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(3.dp))
+                                                    }
+                                                    Text(
+                                                        text = track.artist,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = palette.textSecondary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                             if (isCurrent) {
                                                 RgbLiveVisualizer(isPlaying = playbackState.isPlaying)
@@ -311,7 +393,6 @@ fun LiquidHomeScreen(
                 }
             }
 
-            // Shelves
             items(homeFeed.shelves) { shelf ->
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
@@ -346,6 +427,7 @@ fun LiquidHomeScreen(
                                     track = track,
                                     isCurrent = isCurrent,
                                     isPlaying = isCurrent && playbackState.isPlaying,
+                                    isOffline = offlineIds.contains(track.videoId),
                                     onClick = { viewModel.playTrackOneClick(track, shelf.tracks) }
                                 )
                             }
@@ -362,8 +444,10 @@ fun LiquidTrackTile(
     track: TrackItem,
     isCurrent: Boolean,
     isPlaying: Boolean,
+    isOffline: Boolean = false,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     LiquidGlassSurface(
         shape = RoundedCornerShape(24.dp),
@@ -375,7 +459,7 @@ fun LiquidTrackTile(
         Column(modifier = Modifier.padding(10.dp)) {
             Box {
                 AsyncImage(
-                    model = track.thumbnailUrl,
+                    model = track.effectiveArtworkModel(context),
                     contentDescription = track.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -383,6 +467,22 @@ fun LiquidTrackTile(
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(16.dp))
                 )
+                if (isOffline) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "OFFLINE",
+                            style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                            color = palette.primary
+                        )
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -472,11 +572,17 @@ fun LiquidTrackRow(
     isCurrent: Boolean,
     isPlaying: Boolean,
     isLiked: Boolean,
+    isDownloaded: Boolean = false,
+    downloadProgress: DownloadTaskProgress? = null,
+    subtitleOverride: String? = null,
     onClick: () -> Unit,
     onToggleLike: () -> Unit,
+    onDownloadClick: () -> Unit = {},
+    onDeleteOfflineClick: () -> Unit = {},
     onAddToPlaylist: () -> Unit,
     onStartRadio: () -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -493,7 +599,7 @@ fun LiquidTrackRow(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 AsyncImage(
-                    model = track.thumbnailUrl,
+                    model = track.effectiveArtworkModel(context),
                     contentDescription = track.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -525,13 +631,20 @@ fun LiquidTrackRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = track.artist,
+                    text = subtitleOverride ?: track.artist,
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            OfflineDownloadActionBadge(
+                isDownloaded = isDownloaded,
+                downloadProgress = downloadProgress,
+                onDownloadClick = onDownloadClick,
+                onDeleteOfflineClick = onDeleteOfflineClick
+            )
 
             Icon(
                 imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -560,6 +673,25 @@ fun LiquidTrackRow(
                     onDismissRequest = { menuExpanded = false },
                     modifier = Modifier.background(Color(0xFF14192B))
                 ) {
+                    if (isDownloaded) {
+                        DropdownMenuItem(
+                            text = { Text("ลบออกจากพื้นที่ออฟไลน์", color = Color(0xFFF87171)) },
+                            leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = Color(0xFFF87171)) },
+                            onClick = {
+                                menuExpanded = false
+                                onDeleteOfflineClick()
+                            }
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("ดาวน์โหลดเก็บไว้ฟังออฟไลน์", color = Color.White) },
+                            leadingIcon = { Icon(Icons.Rounded.Download, null, tint = palette.primary) },
+                            onClick = {
+                                menuExpanded = false
+                                onDownloadClick()
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("เปิดวิทยุเพลงแนวนี้", color = Color.White) },
                         leadingIcon = { Icon(Icons.Rounded.Radio, null, tint = palette.primary) },
@@ -588,6 +720,7 @@ fun LiquidSearchScreen(
     bottomInsetPadding: Dp,
     onRequestAddToPlaylist: (TrackItem) -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     val query by viewModel.searchQuery.collectAsState()
     val suggestions by viewModel.searchSuggestions.collectAsState()
@@ -598,6 +731,11 @@ fun LiquidSearchScreen(
     val playbackState by viewModel.playbackState.collectAsState()
     val likedTracks by viewModel.likedTracks.collectAsState()
     val likedIds = remember(likedTracks) { likedTracks.map { it.videoId }.toSet() }
+
+    val offlineRepo = remember { OfflineAudioRepository.getInstance(context) }
+    val offlineTracks by offlineRepo.offlineTracks.collectAsState()
+    val activeDownloads by offlineRepo.activeDownloads.collectAsState()
+    val offlineIds = remember(offlineTracks) { offlineTracks.map { it.videoId }.toSet() }
 
     val focusManager = LocalFocusManager.current
     val clipboardManager = LocalClipboardManager.current
@@ -622,7 +760,6 @@ fun LiquidSearchScreen(
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        // ช่องค้นหากระจกขยายตัวเมื่อโฟกัส
         LiquidGlassSurface(
             shape = CircleShape,
             elevated = isFocused,
@@ -704,7 +841,6 @@ fun LiquidSearchScreen(
             }
         }
 
-        // คำแนะนำการค้นหาแบบ Pill
         AnimatedVisibility(visible = suggestions.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
@@ -800,8 +936,12 @@ fun LiquidSearchScreen(
                             isCurrent = isCurrent,
                             isPlaying = isCurrent && playbackState.isPlaying,
                             isLiked = likedIds.contains(track.videoId),
+                            isDownloaded = offlineIds.contains(track.videoId),
+                            downloadProgress = activeDownloads[track.videoId],
                             onClick = { viewModel.playTrackOneClick(track, songsResult) },
                             onToggleLike = { viewModel.toggleLikeTrack(track) },
+                            onDownloadClick = { viewModel.downloadTrackOffline(context, track) },
+                            onDeleteOfflineClick = { viewModel.deleteOfflineTrack(context, track) },
                             onAddToPlaylist = { onRequestAddToPlaylist(track) },
                             onStartRadio = { viewModel.startRadioForTrack(track) }
                         )
@@ -831,12 +971,20 @@ fun LiquidLibraryScreen(
     viewModel: MainViewModel,
     bottomInsetPadding: Dp
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     val likedTracks by viewModel.likedTracks.collectAsState()
     val recentTracks by viewModel.recentTracks.collectAsState()
     val savedPlaylists by viewModel.savedYtPlaylists.collectAsState()
     val userPlaylists by viewModel.userPlaylists.collectAsState()
     var showCreateDialog by remember { mutableStateOf(false) }
+
+    val offlineRepo = remember { OfflineAudioRepository.getInstance(context) }
+    val offlineTracks by offlineRepo.offlineTracks.collectAsState()
+    val activeDownloads by offlineRepo.activeDownloads.collectAsState()
+    val totalStorageLabel = remember(offlineTracks) {
+        offlineRepo.formatStorageSize(offlineRepo.totalStorageBytes())
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -863,12 +1011,64 @@ fun LiquidLibraryScreen(
             }
         }
 
-        // การ์ดเพลงที่ถูกใจ
+        // การ์ดหลัก: เพลงออฟไลน์บนเครื่อง (แสดงจำนวนเพลง + พื้นที่ MB + สถานะกำลังโหลด)
         item {
             LiquidGlassSurface(
                 shape = RoundedCornerShape(24.dp),
                 elevated = true,
                 accentGlow = true,
+                onClick = {
+                    viewModel.openLocalCollection(
+                        id = "offline",
+                        title = "เพลงออฟไลน์บนเครื่อง",
+                        subtitle = "${offlineTracks.size} เพลง • ใช้พื้นที่ $totalStorageLabel",
+                        tracks = offlineTracks.map { it.toTrackItem() }
+                    )
+                }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(palette.primary, palette.tertiary))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.OfflinePin, null, tint = Color(0xFF04060D), modifier = Modifier.size(30.dp))
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "เพลงออฟไลน์ (Offline Storage)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        val activeCount = activeDownloads.count { it.value.status != OfflineDownloadStatus.FAILED }
+                        val desc = if (activeCount > 0) {
+                            "${offlineTracks.size} เพลง ($totalStorageLabel) • กำลังโหลด $activeCount เพลง..."
+                        } else {
+                            "${offlineTracks.size} เพลงพร้อมฟัง • ใช้พื้นที่ $totalStorageLabel (Opus High-Efficiency)"
+                        }
+                        Text(
+                            text = desc,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = palette.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        // การ์ดเพลงที่ถูกใจ
+        item {
+            LiquidGlassSurface(
+                shape = RoundedCornerShape(24.dp),
                 onClick = {
                     viewModel.openLocalCollection(
                         id = "liked",
@@ -1042,12 +1242,25 @@ fun LiquidCollectionOverlay(
     bottomInsetPadding: Dp,
     onRequestAddToPlaylist: (TrackItem) -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalRgbPalette.current
     val playbackState by viewModel.playbackState.collectAsState()
     val likedTracks by viewModel.likedTracks.collectAsState()
     val savedPlaylists by viewModel.savedYtPlaylists.collectAsState()
     val likedIds = remember(likedTracks) { likedTracks.map { it.videoId }.toSet() }
     val isSavedYt = collection.ytCard != null && savedPlaylists.any { it.browseId == collection.ytCard.browseId }
+
+    val offlineRepo = remember { OfflineAudioRepository.getInstance(context) }
+    val offlineTracks by offlineRepo.offlineTracks.collectAsState()
+    val activeDownloads by offlineRepo.activeDownloads.collectAsState()
+    val offlineMap = remember(offlineTracks) { offlineTracks.associateBy { it.videoId } }
+
+    // หากเปิดหน้า "offline" ให้แสดงรายการล่าสุดจาก OfflineAudioRepository แบบเรียลไทม์
+    val displayedTracks = if (collection.id == "offline") {
+        offlineTracks.map { it.toTrackItem() }
+    } else {
+        collection.tracks
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1065,13 +1278,30 @@ fun LiquidCollectionOverlay(
                     contentDescription = "Back",
                     onClick = { viewModel.closeCollection() }
                 )
-                if (collection.ytCard != null) {
-                    LiquidGlassIconButton(
-                        icon = if (isSavedYt) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                        contentDescription = "Save Playlist",
-                        isAccent = isSavedYt,
-                        onClick = { viewModel.toggleSaveYtPlaylist(collection.ytCard) }
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (collection.id == "offline" && offlineTracks.isNotEmpty()) {
+                        LiquidGlassPillButton(
+                            text = "ล้างทั้งหมด",
+                            icon = Icons.Rounded.DeleteOutline,
+                            isPrimaryRgb = false,
+                            onClick = { viewModel.clearAllOfflineTracks(context) }
+                        )
+                    } else if (displayedTracks.isNotEmpty()) {
+                        LiquidGlassPillButton(
+                            text = "ดาวน์โหลดทั้งหมด",
+                            icon = Icons.Rounded.Download,
+                            isPrimaryRgb = false,
+                            onClick = { viewModel.downloadPlaylistOffline(context, displayedTracks) }
+                        )
+                    }
+                    if (collection.ytCard != null) {
+                        LiquidGlassIconButton(
+                            icon = if (isSavedYt) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                            contentDescription = "Save Playlist",
+                            isAccent = isSavedYt,
+                            onClick = { viewModel.toggleSaveYtPlaylist(collection.ytCard) }
+                        )
+                    }
                 }
             }
         }
@@ -1105,8 +1335,13 @@ fun LiquidCollectionOverlay(
                         color = Color.White,
                         maxLines = 2
                     )
+                    val dynamicSubtitle = if (collection.id == "offline") {
+                        "${offlineTracks.size} เพลง • ใช้พื้นที่ ${offlineRepo.formatStorageSize(offlineRepo.totalStorageBytes())}"
+                    } else {
+                        collection.subtitle
+                    }
                     Text(
-                        text = collection.subtitle,
+                        text = dynamicSubtitle,
                         style = MaterialTheme.typography.labelMedium,
                         color = palette.textSecondary
                     )
@@ -1117,8 +1352,8 @@ fun LiquidCollectionOverlay(
                             icon = Icons.Rounded.PlayArrow,
                             isPrimaryRgb = true,
                             onClick = {
-                                collection.tracks.firstOrNull()?.let {
-                                    viewModel.playTrackOneClick(it, collection.tracks)
+                                displayedTracks.firstOrNull()?.let {
+                                    viewModel.playTrackOneClick(it, displayedTracks)
                                 }
                             }
                         )
@@ -1126,7 +1361,7 @@ fun LiquidCollectionOverlay(
                             text = "สุ่มเล่น",
                             icon = Icons.Rounded.Shuffle,
                             isPrimaryRgb = false,
-                            onClick = { viewModel.shufflePlayList(collection.tracks) }
+                            onClick = { viewModel.shufflePlayList(displayedTracks) }
                         )
                     }
                 }
@@ -1140,15 +1375,25 @@ fun LiquidCollectionOverlay(
                 }
             }
         } else {
-            items(collection.tracks) { track ->
+            items(displayedTracks) { track ->
                 val isCurrent = playbackState.currentTrack?.videoId == track.videoId
+                val offEntity = offlineMap[track.videoId]
+                val sub = if (offEntity != null) {
+                    "${track.artist} • ${offlineRepo.formatStorageSize(offEntity.fileSizeBytes)} (${offEntity.codecLabel})"
+                } else null
+
                 LiquidTrackRow(
                     track = track,
                     isCurrent = isCurrent,
                     isPlaying = isCurrent && playbackState.isPlaying,
                     isLiked = likedIds.contains(track.videoId),
-                    onClick = { viewModel.playTrackOneClick(track, collection.tracks) },
+                    isDownloaded = offEntity != null,
+                    downloadProgress = activeDownloads[track.videoId],
+                    subtitleOverride = sub,
+                    onClick = { viewModel.playTrackOneClick(track, displayedTracks) },
                     onToggleLike = { viewModel.toggleLikeTrack(track) },
+                    onDownloadClick = { viewModel.downloadTrackOffline(context, track) },
+                    onDeleteOfflineClick = { viewModel.deleteOfflineTrack(context, track) },
                     onAddToPlaylist = { onRequestAddToPlaylist(track) },
                     onStartRadio = { viewModel.startRadioForTrack(track) }
                 )

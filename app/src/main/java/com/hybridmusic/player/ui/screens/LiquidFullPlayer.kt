@@ -30,7 +30,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Pause
@@ -61,7 +65,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.hybridmusic.player.offline.OfflineAudioRepository
+import com.hybridmusic.player.offline.effectiveArtworkModel
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.hybridmusic.player.innertube.TrackItem
@@ -102,7 +109,7 @@ fun LiquidMiniPlayerBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AsyncImage(
-                    model = track.thumbnailUrl,
+                    model = track.effectiveArtworkModel(LocalContext.current),
                     contentDescription = track.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -267,7 +274,7 @@ fun LiquidFullPlayerSheet(
                                 .aspectRatio(1f)
                         ) {
                             AsyncImage(
-                                model = track.thumbnailUrl,
+                                model = track.effectiveArtworkModel(LocalContext.current),
                                 contentDescription = track.title,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -300,6 +307,20 @@ fun LiquidFullPlayerSheet(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            val ctx = LocalContext.current
+                            val offRepo = remember { OfflineAudioRepository.getInstance(ctx) }
+                            val offList by offRepo.offlineTracks.collectAsState()
+                            val isTrackOffline = offList.any { it.videoId == track.videoId }
+                            LiquidGlassIconButton(
+                                icon = if (isTrackOffline) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                                contentDescription = "Offline Download",
+                                isAccent = isTrackOffline,
+                                onClick = {
+                                    if (isTrackOffline) viewModel.deleteOfflineTrack(ctx, track)
+                                    else viewModel.downloadTrackOffline(ctx, track)
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             LiquidGlassIconButton(
                                 icon = Icons.Rounded.Radio,
                                 contentDescription = "Radio",
@@ -469,7 +490,7 @@ fun LiquidFullPlayerSheet(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         AsyncImage(
-                                            model = qTrack.thumbnailUrl,
+                                            model = qTrack.effectiveArtworkModel(LocalContext.current),
                                             contentDescription = qTrack.title,
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier
@@ -520,7 +541,7 @@ fun LiquidFullPlayerSheet(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             AsyncImage(
-                                                model = rel.thumbnailUrl,
+                                                model = rel.effectiveArtworkModel(LocalContext.current),
                                                 contentDescription = rel.title,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier
