@@ -17,13 +17,13 @@ class YoutubeChunkedDataSource(
 ) : DataSource {
 
     companion object {
-        // หั่นคำขอเป็นก้อนละ 256 KB เพื่อให้ YouTube CDN จ่ายเต็มสปีดเหมือน DASH segment ไม่โดนบีบแบนด์วิดท์
         private const val CHUNK_SIZE_BYTES = 262_144L
+        private const val LENGTH_UNSET = C.LENGTH_UNSET.toLong()
     }
 
     private var rootSpec: DataSpec? = null
     private var currentPosition: Long = 0L
-    private var totalRemaining: Long = C.LENGTH_UNSET
+    private var totalRemaining: Long = LENGTH_UNSET
     private var chunkRemaining: Long = 0L
     private var chunkOpened: Boolean = false
     private var serverSupportsRange: Boolean = false
@@ -71,7 +71,7 @@ class YoutubeChunkedDataSource(
         }
 
         val base = rootSpec ?: throw IOException("DataSpec is null")
-        val requestLen = if (totalRemaining == C.LENGTH_UNSET) {
+        val requestLen = if (totalRemaining == LENGTH_UNSET) {
             CHUNK_SIZE_BYTES
         } else {
             min(totalRemaining, CHUNK_SIZE_BYTES)
@@ -96,11 +96,11 @@ class YoutubeChunkedDataSource(
             ?: upstream.responseHeaders["content-range"]?.firstOrNull()
         serverSupportsRange = contentRange != null
 
-        if (totalRemaining == C.LENGTH_UNSET) {
+        if (totalRemaining == LENGTH_UNSET) {
             val totalSize = contentRange?.substringAfterLast('/')?.trim()?.toLongOrNull()
             if (totalSize != null && totalSize > currentPosition) {
                 totalRemaining = totalSize - currentPosition
-            } else if (!serverSupportsRange && openedLen != C.LENGTH_UNSET) {
+            } else if (!serverSupportsRange && openedLen != LENGTH_UNSET) {
                 totalRemaining = openedLen
             }
         }
@@ -122,7 +122,7 @@ class YoutubeChunkedDataSource(
             if (chunkRemaining == 0L) return C.RESULT_END_OF_INPUT
         }
 
-        val toRead = if (chunkRemaining != C.LENGTH_UNSET) {
+        val toRead = if (chunkRemaining != LENGTH_UNSET) {
             min(length.toLong(), chunkRemaining).toInt()
         } else {
             length
@@ -134,7 +134,7 @@ class YoutubeChunkedDataSource(
                 totalRemaining = 0L
                 return C.RESULT_END_OF_INPUT
             }
-            if (totalRemaining == C.LENGTH_UNSET || totalRemaining > 0L) {
+            if (totalRemaining == LENGTH_UNSET || totalRemaining > 0L) {
                 openNextChunk()
                 if (chunkRemaining == 0L) return C.RESULT_END_OF_INPUT
                 return read(buffer, offset, length)
@@ -143,10 +143,10 @@ class YoutubeChunkedDataSource(
         }
 
         currentPosition += bytesRead
-        if (chunkRemaining != C.LENGTH_UNSET) {
+        if (chunkRemaining != LENGTH_UNSET) {
             chunkRemaining -= bytesRead
         }
-        if (totalRemaining != C.LENGTH_UNSET) {
+        if (totalRemaining != LENGTH_UNSET) {
             totalRemaining = (totalRemaining - bytesRead).coerceAtLeast(0L)
         }
         return bytesRead
