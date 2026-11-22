@@ -69,7 +69,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.media3:media3-session:1.4.1")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
