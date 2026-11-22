@@ -1,5 +1,11 @@
 package com.hybridmusic.player.player
 
+import androidx.media3.exoplayer.ExoPlayer
+
+import androidx.media3.common.C
+
+import androidx.media3.common.AudioAttributes
+
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
@@ -85,6 +91,17 @@ class PlayerController(
     )
 
     init {
+        runCatching {
+            val audioAttrs = AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setUsage(C.USAGE_MEDIA)
+                .build()
+            player.setAudioAttributes(audioAttrs, true)
+            player.setWakeMode(C.WAKE_MODE_NETWORK)
+            player.setHandleAudioBecomingNoisy(true)
+            ensureBackgroundMediaSession()
+        }
+
         connectToService()
     }
 
@@ -415,4 +432,22 @@ class PlayerController(
         _uiState.value = _uiState.value.copy(repeatMode = next)
         scheduleNextTracksPrefetch()
     }
+
+    fun getExoPlayer(): ExoPlayer = player
+
+    private var backgroundSessionController: MediaController? = null
+
+    fun ensureBackgroundMediaSession() {
+        if (backgroundSessionController != null) return
+        runCatching {
+            val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+            val future = MediaController.Builder(context, token).buildAsync()
+            future.addListener({
+                runCatching {
+                    backgroundSessionController = future.get()
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+    }
+
 }
